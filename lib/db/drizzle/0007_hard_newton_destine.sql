@@ -1,0 +1,2 @@
+CREATE UNIQUE INDEX "poll_calendar_events_one_confirmed_idx" ON "poll_calendar_events" USING btree ("poll_id") WHERE "poll_calendar_events"."kind" = 'confirmed';--> statement-breakpoint
+ALTER TABLE "poll_calendar_events" ADD CONSTRAINT "poll_calendar_events_kind_check" CHECK ("poll_calendar_events"."kind" in ('tentative', 'confirmed'));

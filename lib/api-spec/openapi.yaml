@@ -1,0 +1,895 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: API specification
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: polls
+    description: Event date coordination
+  - name: feature-requests
+    description: Product feedback and feature requests
+  - name: calendar
+    description: Organizer-owned Google Calendar integration
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      description: Returns server health status
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+  /feature-requests:
+    post:
+      operationId: createFeatureRequest
+      tags: [feature-requests]
+      summary: Send a feature request to the HI-DO-RI team
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FeatureRequestInput"
+      responses:
+        "201":
+          description: Feature request sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeatureRequestResult"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Too many requests
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: Notification could not be delivered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /feature-requests/development:
+    get:
+      operationId: listFeatureRequestDevelopment
+      tags: [feature-requests]
+      summary: List feature requests for the operator development board
+      responses:
+        "200":
+          description: Development board
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FeatureRequestDevelopmentItem"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Operator access required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /feature-requests/{id}/development-status:
+    post:
+      operationId: updateFeatureRequestDevelopmentStatus
+      tags: [feature-requests]
+      summary: Record a milestone and notify Slack
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: number
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FeatureRequestDevelopmentStatusInput"
+      responses:
+        "200":
+          description: Milestone recorded and notified
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeatureRequestDevelopmentItem"
+        "400":
+          description: Invalid update
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Operator access required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Request not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Milestone already recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: Slack notification failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /calendar/connection:
+    get:
+      operationId: getCalendarConnection
+      tags: [calendar]
+      summary: Get the signed-in organizer's Google Calendar connection
+      responses:
+        "200":
+          description: Calendar connection state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CalendarConnection"
+        "401":
+          description: Organizer authentication is required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: enableCalendarConnection
+      tags: [calendar]
+      summary: Enable the signed-in organizer's authorized Google Calendar account
+      responses:
+        "200":
+          description: Calendar connection enabled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CalendarConnection"
+        "401":
+          description: Organizer authentication is required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Google OAuth authorization or required scopes are missing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: disableCalendarConnection
+      tags: [calendar]
+      summary: Disable Google Calendar access for the signed-in organizer
+      responses:
+        "204":
+          description: Calendar connection disabled
+        "401":
+          description: Organizer authentication is required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /calendar/candidates:
+    post:
+      operationId: generateCalendarCandidates
+      tags: [calendar]
+      summary: Generate available candidate slots from Japanese text
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CalendarCandidateRequest"
+      responses:
+        "200":
+          description: Available candidate slots
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CalendarCandidateResult"
+        "400":
+          description: Unsupported condition
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Organizer authentication is required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Google Calendar is not connected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: Google Calendar could not be queried
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /calendar/events:
+    post:
+      operationId: createCalendarEvent
+      tags: [calendar]
+      summary: Add a confirmed HI-DO-RI event to the connected calendar
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CalendarEventRequest"
+      responses:
+        "201":
+          description: Calendar event created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CalendarEventResult"
+        "400":
+          description: Invalid event
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Organizer authentication is required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: The poll is not owned by the signed-in organizer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Google Calendar is not connected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: Google Calendar event creation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /polls:
+    get:
+      operationId: listOrganizerPolls
+      tags: [polls]
+      summary: List polls owned by the signed-in organizer
+      responses:
+        "200":
+          description: Organizer poll history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/OrganizerPollSummary"
+        "401":
+          description: Organizer authentication is required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: createPoll
+      tags: [polls]
+      summary: Create an event date poll
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PollInput"
+      responses:
+        "201":
+          description: Created poll
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreatedPoll"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Organizer authentication is required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Organizer creation limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /polls/{shareId}:
+    get:
+      operationId: getPoll
+      tags: [polls]
+      summary: Get a poll by its share ID
+      parameters:
+        - $ref: "#/components/parameters/ShareId"
+      responses:
+        "200":
+          description: Poll details and responses
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Poll"
+        "404":
+          description: Poll not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: updatePoll
+      tags: [polls]
+      summary: Update an owned poll and append candidate dates
+      parameters:
+        - $ref: "#/components/parameters/ShareId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PollUpdate"
+      responses:
+        "200":
+          description: Updated poll
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Poll"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Organizer authentication is required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: The signed-in organizer does not own this poll
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Poll not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Poll is already closed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /polls/{shareId}/responses:
+    post:
+      operationId: createPollResponse
+      tags: [polls]
+      summary: Submit or update a participant response
+      parameters:
+        - $ref: "#/components/parameters/ShareId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PollResponseInput"
+      responses:
+        "201":
+          description: Saved response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PollResponse"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Poll not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Response submission is closed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /polls/{shareId}/legacy-claim:
+    post:
+      operationId: claimLegacyPoll
+      tags: [polls]
+      summary: Claim a specific legacy poll with a one-time migration token
+      parameters:
+        - $ref: "#/components/parameters/ShareId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LegacyPollClaimInput"
+      responses:
+        "200":
+          description: Legacy poll claimed by the signed-in organizer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Poll"
+        "400":
+          description: Invalid migration request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Organizer authentication is required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Invalid migration token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Legacy poll not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Legacy poll is already owned by another account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /polls/{shareId}/confirmation:
+    post:
+      operationId: confirmPoll
+      tags: [polls]
+      summary: Confirm the event date and close responses
+      parameters:
+        - $ref: "#/components/parameters/ShareId"
+        - $ref: "#/components/parameters/AdminKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PollConfirmationInput"
+      responses:
+        "200":
+          description: Confirmed poll
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Poll"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing management key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Invalid management key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Poll or candidate not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Poll is already closed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+components:
+  parameters:
+    ShareId:
+      name: shareId
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 6
+        maxLength: 32
+    AdminKey:
+      name: X-Admin-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 20
+        maxLength: 128
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+    FeatureRequestInput:
+      type: object
+      required: [name, request]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+        contact:
+          type: string
+          maxLength: 160
+        request:
+          type: string
+          minLength: 10
+          maxLength: 2000
+        useCase:
+          type: string
+          maxLength: 1000
+    FeatureRequestResult:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean
+    FeatureRequestDevelopmentStatus:
+      type: string
+      enum: [received, approved, in_progress, validating, preview_ready, completed]
+    FeatureRequestDevelopmentStatusInput:
+      type: object
+      required: [status]
+      properties:
+        status:
+          $ref: "#/components/schemas/FeatureRequestDevelopmentStatus"
+        note:
+          type: string
+          maxLength: 500
+    FeatureRequestDevelopmentItem:
+      type: object
+      required: [id, name, request, notificationStatus, developmentStatus, createdAt, developmentStatusUpdatedAt]
+      properties:
+        id:
+          type: number
+        name:
+          type: string
+        request:
+          type: string
+        useCase:
+          type: ["string", "null"]
+        notificationStatus:
+          type: string
+        developmentStatus:
+          $ref: "#/components/schemas/FeatureRequestDevelopmentStatus"
+        developmentNote:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+        developmentStatusUpdatedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: ["string", "null"]
+          format: date-time
+    CalendarCandidateRequest:
+      type: object
+      required: [condition]
+      properties:
+        condition:
+          type: string
+          minLength: 3
+          maxLength: 200
+        limit:
+          type: number
+          minimum: 2
+          maximum: 20
+    CalendarConnection:
+      type: object
+      required: [connected]
+      properties:
+        connected:
+          type: boolean
+        email:
+          type: ["string", "null"]
+    CalendarCandidateSlot:
+      type: object
+      required: [label, start, end]
+      properties:
+        label:
+          type: string
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time
+    CalendarCandidateResult:
+      type: object
+      required: [slots, interpretation]
+      properties:
+        slots:
+          type: array
+          items:
+            $ref: "#/components/schemas/CalendarCandidateSlot"
+        interpretation:
+          type: string
+    CalendarEventRequest:
+      type: object
+      required: [shareId]
+      properties:
+        shareId:
+          type: string
+          minLength: 1
+          maxLength: 64
+    CalendarEventResult:
+      type: object
+      required: [eventId, htmlLink]
+      properties:
+        eventId:
+          type: string
+        htmlLink:
+          type: string
+    Poll:
+      type: object
+      required: [id, shareId, title, note, deadline, candidates, responses, createdAt, isClosed, confirmedCandidateId, canManage]
+      properties:
+        id:
+          type: number
+        shareId:
+          type: string
+        title:
+          type: string
+        note:
+          type: string
+        deadline:
+          type: ["string", "null"]
+          format: date-time
+        candidates:
+          type: array
+          items:
+            $ref: "#/components/schemas/PollCandidate"
+        responses:
+          type: array
+          items:
+            $ref: "#/components/schemas/PollResponse"
+        createdAt:
+          type: string
+          format: date-time
+        isClosed:
+          type: boolean
+        confirmedCandidateId:
+          type: ["number", "null"]
+        canManage:
+          type: boolean
+    CreatedPoll:
+      allOf:
+        - $ref: "#/components/schemas/Poll"
+        - type: object
+          required: [adminKey]
+          properties:
+            adminKey:
+              type: string
+              minLength: 20
+              maxLength: 128
+    OrganizerPollSummary:
+      type: object
+      required: [shareId, title, note, deadline, createdAt, isClosed, responseCount]
+      properties:
+        shareId:
+          type: string
+        title:
+          type: string
+        note:
+          type: string
+        deadline:
+          type: ["string", "null"]
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        isClosed:
+          type: boolean
+        responseCount:
+          type: number
+    PollCandidate:
+      type: object
+      required: [id, label, start, end, yesCount, maybeCount, noCount]
+      properties:
+        id:
+          type: number
+        label:
+          type: string
+        start:
+          type: ["string", "null"]
+          format: date-time
+        end:
+          type: ["string", "null"]
+          format: date-time
+        yesCount:
+          type: number
+        maybeCount:
+          type: number
+        noCount:
+          type: number
+    PollResponse:
+      type: object
+      required: [id, name, answers, createdAt]
+      properties:
+        id:
+          type: number
+        name:
+          type: string
+        answers:
+          type: array
+          items:
+            type: string
+            enum: [yes, maybe, no]
+        comment:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+    PollInput:
+      type: object
+      required: [title, candidates]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 120
+        note:
+          type: string
+          maxLength: 500
+        deadline:
+          type: ["string", "null"]
+          format: date-time
+        candidates:
+          type: array
+          minItems: 2
+          maxItems: 20
+          items:
+            type: string
+            minLength: 1
+            maxLength: 100
+        candidateSlots:
+          type: array
+          items:
+            $ref: "#/components/schemas/CalendarCandidateSlot"
+          maxItems: 20
+    PollUpdate:
+      type: object
+      required: [title, note, newCandidates]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 100
+        note:
+          type: string
+          maxLength: 500
+        newCandidates:
+          type: array
+          maxItems: 20
+          items:
+            type: string
+            minLength: 1
+            maxLength: 100
+    PollResponseInput:
+      type: object
+      required: [name, answers]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+        answers:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items:
+            type: string
+            enum: [yes, maybe, no]
+        comment:
+          type: ["string", "null"]
+          maxLength: 500
+    PollConfirmationInput:
+      type: object
+      required: [candidateId]
+      properties:
+        candidateId:
+          type: number
+    LegacyPollClaimInput:
+      type: object
+      required: [claimToken]
+      properties:
+        claimToken:
+          type: string
+          minLength: 20
+          maxLength: 128
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+        code:
+          type: string
+          enum: [google_calendar_reconnect_required]
+

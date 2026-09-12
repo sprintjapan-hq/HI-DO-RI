@@ -1,0 +1,1 @@
+ALTER TABLE "poll_calendar_syncs" ADD COLUMN "lease_token" text;

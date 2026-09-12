@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "日どり"
+description = "候補日を出して共有し、参加者の都合を集められる日本語のイベント日程調整アプリ。経営者向けAI勉強会などの小規模な集まりを、ログインなしで手早く調整できます。"
+version = "1.0.0"
+id = "artifacts/hidori"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 18347
+
+[services.development]
+run = "pnpm --filter @workspace/hidori run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/hidori", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/hidori/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "18347"
+BASE_PATH = "/"

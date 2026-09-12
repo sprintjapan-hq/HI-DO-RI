@@ -1,0 +1,16 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "Ld6Hj5TquFzkN7pMlhAQQ"
+uri = "file://downloads/HI-DO-RI-source-2026-09-10.zip"
+type = "unspecified"
+title = "HI-DO-RI ソース ZIP"
+description = "2026-09-10時点のソース、設定、ロックファイル、必要な添付素材を含むダウンロード用ZIPです。"
+logical_id = "b926040c-989a-413b-b2f9-a354e5ce9e77"
+content_hash = "sha256:6c70ef845d64b0ab5c03de8e338176534e02e79d78e74beec736cbadc372256f"
+size = 27899620
+mtime_ms = 1789040700199
+storage_uri = "gcs://replit-rams-assets-sisko/rams/assets/repl:b32b4a31-8b19-452d-940b-c35b53390af6/b926040c-989a-413b-b2f9-a354e5ce9e77/44ce846c-634f-437e-8c5c-fc3a7cd20737"
+storage_version_token = "1789040710032130"
+content_type = "application/octet-stream"

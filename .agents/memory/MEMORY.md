@@ -1,0 +1,9 @@
+- [OpenAPI integer compatibility](openapi-zod-integer-generation.md) — use numeric schemas until Orval's generated integer validator matches the installed Zod runtime.
+- [Local API test ports](local-api-test-ports.md) — reserve an ephemeral port and verify the API-specific health payload before integration tests.
+- [Legacy migration adoption](legacy-migration-adoption.md) — account for schema changes already applied by the former push workflow when seeding migration history.
+- [Added candidate response semantics](added-candidate-response-semantics.md) — dates appended after responses exist remain unanswered; never reinterpret them as ×.
+- [Legacy ownership recovery](legacy-ownership-recovery.md) — ownerless events without admin keys can be safely claimed through a login-bound, one-time token flow.
+- [Organizer calendar ownership](calendar-connector-scope.md) — calendar access is Clerk-user-scoped; confirmed event times must come from server-owned poll data.
+- [Development milestone notifications](development-milestone-notifications.md) — structured progress and button-triggered completion notifications are confirmed end-to-end in Slack.
+- [Natural-language candidate generation](natural-language-candidate-generation.md) — organizer-confirmed in test: vague Japanese constraints can generate usable dates for a new event.
+- [Release history publishing](release-history-publishing.md) — completion notes are public release text; production-only feature gates must not hide approved functionality.

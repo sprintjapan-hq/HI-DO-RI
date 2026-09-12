@@ -1,0 +1,2 @@
+ALTER TABLE "feature_requests" ADD COLUMN "notification_key" text NOT NULL;--> statement-breakpoint
+ALTER TABLE "feature_requests" ADD CONSTRAINT "feature_requests_notification_key_unique" UNIQUE("notification_key");

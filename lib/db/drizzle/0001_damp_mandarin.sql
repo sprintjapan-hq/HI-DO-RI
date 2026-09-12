@@ -1,0 +1,1 @@
+ALTER TABLE "polls" ADD COLUMN "owner_user_id" text;

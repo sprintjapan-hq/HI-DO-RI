@@ -1,0 +1,101 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Noto+Sans+JP:wght@400;500;600&family=Shippori+Mincho:wght@500;700&display=swap');
+@layer theme, base, clerk, components, utilities;
+@import 'tailwindcss';
+@import '@clerk/themes/shadcn.css';
+@import 'tw-animate-css';
+@plugin "@tailwindcss/typography";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+
+  --font-sans: 'Inter', 'Noto Sans JP', sans-serif;
+  --font-serif: 'Shippori Mincho', 'Noto Serif JP', serif;
+
+  --radius-sm: 0.125rem;
+  --radius-md: 0.25rem;
+  --radius-lg: 0.375rem;
+  --radius-xl: 0.5rem;
+}
+
+:root {
+  /* Warm washi paper background */
+  --background: 42 30% 97%;
+  /* Deep charcoal / indigo foreground */
+  --foreground: 220 30% 15%;
+  
+  /* Pure white cards with slight warmth */
+  --card: 45 20% 99%;
+  --card-foreground: 220 30% 15%;
+  
+  /* Borders - slightly darker than bg */
+  --border: 42 15% 86%;
+  --input: 42 15% 86%;
+  
+  /* Ai-iro (Indigo) */
+  --primary: 218 45% 35%;
+  --primary-foreground: 45 20% 99%;
+  --ring: 218 45% 35%;
+  
+  --muted: 42 15% 92%;
+  --muted-foreground: 220 15% 45%;
+  
+  --destructive: 0 60% 50%;
+  --destructive-foreground: 0 0% 100%;
+  
+  --radius: 0.375rem;
+}
+
+.dark {
+  /* Replit-inspired navy canvas with orange actions */
+  --background: 220 35% 9%;
+  --foreground: 210 22% 94%;
+  --card: 220 31% 13%;
+  --card-foreground: 210 22% 94%;
+  --border: 220 22% 23%;
+  --input: 220 22% 25%;
+  --primary: 25 96% 53%;
+  --primary-foreground: 220 35% 8%;
+  --ring: 25 96% 53%;
+  --muted: 220 28% 17%;
+  --muted-foreground: 215 18% 66%;
+  --destructive: 0 72% 62%;
+  --destructive-foreground: 0 0% 100%;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply font-sans antialiased bg-background text-foreground;
+    transition: background-color 200ms ease, color 200ms ease;
+  }
+}
+
+.cl-formFieldInput::placeholder {
+  color: #7d8796;
+  opacity: 1;
+}
+
+.cl-socialButtonsBlockButton:hover,
+.cl-formFieldInput:focus {
+  border-color: #f97316;
+}
