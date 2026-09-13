@@ -97,6 +97,13 @@ export function Layout({ children }: { children: ReactNode }) {
             >
               プライバシーポリシー
             </Link>
+            <span aria-hidden="true" className="text-border">|</span>
+            <Link
+              href="/terms"
+              className="text-sm font-medium text-muted-foreground underline-offset-4 transition-colors hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              ご利用規約
+            </Link>
           </nav>
           <p className="text-sm font-semibold tracking-[0.08em] text-foreground/90">
             Produce by SPRINT Japan
