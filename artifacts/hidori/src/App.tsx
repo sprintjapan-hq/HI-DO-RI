@@ -12,6 +12,7 @@ import EditPoll from '@/pages/edit-poll';
 import FeatureRequest from '@/pages/feature-request';
 import FeatureHistory from '@/pages/feature-history';
 import Privacy from '@/pages/privacy';
+import Terms from '@/pages/terms';
 import AdminDevelopment from '@/pages/admin-development';
 import ClaimLegacyPoll from '@/pages/claim-legacy-poll';
 import { ThemeProvider } from '@/lib/theme';
@@ -170,6 +171,7 @@ function Router() {
       <Route path="/feature-request" component={FeatureRequest} />
       <Route path="/feature-history" component={FeatureHistory} />
       <Route path="/privacy" component={Privacy} />
+      <Route path="/terms" component={Terms} />
       <Route path="/admin/development" component={AdminDevelopmentRoute} />
       <Route path="/claim-legacy-poll" component={ClaimLegacyPollRoute} />
       <Route path="/p/:shareId/edit" component={EditPollRoute} />
