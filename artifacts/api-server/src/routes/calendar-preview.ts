@@ -74,13 +74,21 @@ function parseCondition(condition: string, now: Date) {
       /(午前|午後|夜)?\s*(\d{1,2})(?::(\d{1,2})|時)\s*[-–—〜～]\s*(午前|午後|夜)?\s*(\d{1,2})(?::(\d{1,2})|時)/,
     );
   const hourMatch = condition.match(/(午前|午後|夜)?\s*(\d{1,2})(?::(\d{1,2}))?\s*時(?!間)(?:以降|から)?/);
-  const periodMatch = condition.match(/(?:^|の|[、。\s])(午前|午後|夜)(?=$|[、。\s])/);
-  const periodHours = periodMatch?.[1] === "午前"
+  
+  // Improved period matching: support various forms like 午後3時間, 午前中, 午後に, 昼, 夕方, etc.
+  // Match period words that are NOT immediately followed by digit+時 (but 時間 is OK)
+  const periodMatch = condition.match(/(午前中?|午後|夜|昼|夕方)(?![0-9０-９]*時(?!間))/);
+  
+  const periodHours = periodMatch?.[1] === "午前" || periodMatch?.[1] === "午前中"
     ? { start: 9, end: 12 }
     : periodMatch?.[1] === "午後"
       ? { start: 13, end: 18 }
       : periodMatch?.[1] === "夜"
         ? { start: 18, end: 22 }
+      : periodMatch?.[1] === "昼"
+        ? { start: 11, end: 14 }
+      : periodMatch?.[1] === "夕方"
+        ? { start: 16, end: 19 }
         : null;
   const durationMinutes = durationMatch
     ? Number(durationMatch[1]) * 60

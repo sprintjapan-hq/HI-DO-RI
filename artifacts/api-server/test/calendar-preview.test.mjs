@@ -46,13 +46,17 @@ function parseCondition(condition, now) {
       /(午前|午後|夜)?\s*(\d{1,2})(?::(\d{1,2})|時)\s*[-–—〜～]\s*(午前|午後|夜)?\s*(\d{1,2})(?::(\d{1,2})|時)/,
     );
   const hourMatch = condition.match(/(午前|午後|夜)?\s*(\d{1,2})(?::(\d{1,2}))?\s*時(?!間)(?:以降|から)?/);
-  const periodMatch = condition.match(/(?:^|の|[、。\s])(午前|午後|夜)(?=$|[、。\s])/);
-  const periodHours = periodMatch?.[1] === "午前"
+  const periodMatch = condition.match(/(午前中?|午後|夜|昼|夕方)(?![0-9０-９]*時(?!間))/);
+  const periodHours = periodMatch?.[1] === "午前" || periodMatch?.[1] === "午前中"
     ? { start: 9, end: 12 }
     : periodMatch?.[1] === "午後"
       ? { start: 13, end: 18 }
       : periodMatch?.[1] === "夜"
         ? { start: 18, end: 22 }
+      : periodMatch?.[1] === "昼"
+        ? { start: 11, end: 14 }
+      : periodMatch?.[1] === "夕方"
+        ? { start: 16, end: 19 }
         : null;
   const durationMinutes = durationMatch
     ? Number(durationMatch[1]) * 60
@@ -600,4 +604,60 @@ test("parseCondition - v0.6回帰: 平日9:00-12:00", () => {
   assert.strictEqual(result.startMinute, 0, "開始分");
   assert.strictEqual(result.endTimeMinutes, 12 * 60, "終了時刻");
   assert.strictEqual(result.horizonDays, 30, "デフォルト30日");
+});
+
+// 時間帯表現の改善テスト (ユーザーレポートに基づく)
+test("parseCondition - 10/20-10/25までの午後3時間枠", () => {
+  const result = parseCondition("10/20-10/25までの午後3時間枠", FIXED_NOW);
+  assert.ok(result, "結果がnullではない");
+  assert.strictEqual(result.startHour, 13, "午後の開始: 13時");
+  assert.strictEqual(result.endTimeMinutes, 18 * 60, "午後の終了: 18:00");
+  assert.strictEqual(result.durationMinutes, 180, "3時間枠");
+});
+
+test("parseCondition - 11/5-11/10までの午前中3時間枠", () => {
+  const result = parseCondition("11/5-11/10までの午前中3時間枠", FIXED_NOW);
+  assert.ok(result, "結果がnullではない");
+  assert.strictEqual(result.startHour, 9, "午前の開始: 9時");
+  assert.strictEqual(result.endTimeMinutes, 12 * 60, "午前の終了: 12:00");
+  assert.strictEqual(result.durationMinutes, 180, "3時間枠");
+});
+
+test("parseCondition - 午後に2時間", () => {
+  const result = parseCondition("午後に2時間", FIXED_NOW);
+  assert.ok(result, "結果がnullではない");
+  assert.strictEqual(result.startHour, 13, "午後の開始: 13時");
+  assert.strictEqual(result.endTimeMinutes, 18 * 60, "午後の終了: 18:00");
+  assert.strictEqual(result.durationMinutes, 120, "2時間");
+});
+
+test("parseCondition - 昼90分", () => {
+  const result = parseCondition("昼90分", FIXED_NOW);
+  assert.ok(result, "結果がnullではない");
+  assert.strictEqual(result.startHour, 11, "昼の開始: 11時");
+  assert.strictEqual(result.endTimeMinutes, 14 * 60, "昼の終了: 14:00");
+  assert.strictEqual(result.durationMinutes, 90, "90分");
+});
+
+test("parseCondition - 夕方1時間", () => {
+  const result = parseCondition("夕方1時間", FIXED_NOW);
+  assert.ok(result, "結果がnullではない");
+  assert.strictEqual(result.startHour, 16, "夕方の開始: 16時");
+  assert.strictEqual(result.endTimeMinutes, 19 * 60, "夕方の終了: 19:00");
+  assert.strictEqual(result.durationMinutes, 60, "1時間");
+});
+
+test("parseCondition - 午後3時から2時間（具体的な時刻、時間帯ではない）", () => {
+  const result = parseCondition("午後3時から2時間", FIXED_NOW);
+  assert.ok(result, "結果がnullではない");
+  assert.strictEqual(result.startHour, 15, "午後3時 = 15時");
+  assert.strictEqual(result.endTimeMinutes, 24 * 60, "デフォルト終了: 24:00");
+  assert.strictEqual(result.durationMinutes, 120, "2時間");
+});
+
+test("parseCondition - 10/20-10/25までの平日（までのが動作）", () => {
+  const result = parseCondition("10/20-10/25までの平日", FIXED_NOW);
+  assert.ok(result, "結果がnullではない");
+  assert.strictEqual(result.dayType, "weekday", "平日");
+  assert.ok(result.rangeStart, "日付範囲が設定されている");
 });
