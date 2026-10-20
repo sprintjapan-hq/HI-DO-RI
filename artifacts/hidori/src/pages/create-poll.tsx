@@ -169,6 +169,10 @@ export default function CreatePoll() {
                   )}
                 </div>
               )}
+              {/* PR #4 反映後に削除する暫定案内 */}
+              <div className="rounded-md bg-muted/40 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+                曜日は『平日』『土日』だけが読み取られます。『火曜と木曜』『月水金』のように曜日を挙げても絞られず、毎日が候補になります。土日を外すときは『平日』と書いてください。開始日を今日にすると、年を書いていない場合は翌年の日付になります。年も書くか、開始日を明日以降にしてください。作る前に、プレビューで日付と曜日を確かめてください。
+              </div>
               <Textarea
                 id="candidatesText"
                 placeholder={"9/24(水) 19:00\n9/27(土) 15:00\n9/30(火) 19:00"}
