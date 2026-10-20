@@ -441,7 +441,7 @@ export type TimeSlot = {
 export function generateCandidateSlots(
   parsed: ParsedCondition,
   now: Date,
-  limit: number = 10
+  limit?: number
 ): TimeSlot[] {
   if (!parsed) return [];
   
@@ -449,7 +449,7 @@ export function generateCandidateSlots(
   const rangeEnd = parsed.rangeEnd ?? new Date(now.getTime() + parsed.horizonDays * 24 * 60 * 60 * 1000);
   const slots: TimeSlot[] = [];
 
-  for (let offset = 0; offset < parsed.horizonDays && slots.length < limit; offset += 1) {
+  for (let offset = 0; offset < parsed.horizonDays; offset += 1) {
     const probe = new Date(rangeStart.getTime() + offset * 24 * 60 * 60 * 1000);
     if (probe >= rangeEnd) break;
     const parts = tokyoDateParts(probe);
@@ -463,7 +463,7 @@ export function generateCandidateSlots(
 
     for (
       let startTimeMinutes = parsed.startHour * 60 + parsed.startMinute;
-      startTimeMinutes + parsed.durationMinutes <= parsed.endTimeMinutes && slots.length < limit;
+      startTimeMinutes + parsed.durationMinutes <= parsed.endTimeMinutes;
       startTimeMinutes += 60
     ) {
       const hour = Math.floor(startTimeMinutes / 60);
@@ -486,6 +486,10 @@ export function generateCandidateSlots(
         endHour: Math.floor((startTimeMinutes + parsed.durationMinutes) / 60),
         endMinute: (startTimeMinutes + parsed.durationMinutes) % 60,
       });
+      
+      if (limit !== undefined && slots.length >= limit) {
+        return slots;
+      }
     }
   }
 

@@ -187,10 +187,12 @@ router.post(["/calendar/candidates", "/calendar-preview/candidates"], async (req
   const busy = calendar.busy ?? [];
   const limit = body.data.limit ?? 10;
   
-  const candidateSlots = generateCandidateSlots(parsed, now, limit);
+  // Generate all candidate slots (without limit)
+  const candidateSlots = generateCandidateSlots(parsed, now);
   
   const slots: Array<{ label: string; start: string; end: string }> = [];
   
+  // Filter out busy slots and take first 'limit' slots
   for (const slot of candidateSlots) {
     const start = tokyoOffsetDate(slot.year, slot.month, slot.day, slot.startHour);
     const startWithMinutes = new Date(start.getTime() + slot.startMinute * 60 * 1000);
