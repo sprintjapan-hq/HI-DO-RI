@@ -63,7 +63,7 @@ function normalizeHour(hour: number, period?: string) {
   return hour;
 }
 
-function parseCondition(condition: string, now: Date) {
+export function parseCondition(condition: string, now: Date) {
   const durationMatch = condition.match(/(\d+(?:\.\d+)?)\s*時間/);
   const minuteMatch = condition.match(/(\d+)\s*分/);
   const timeRangeMatch =
@@ -637,7 +637,9 @@ router.post(["/calendar/candidates", "/calendar-preview/candidates"], async (req
       ? "土日" 
       : parsed.dayType === "specific" && parsed.allowedWeekdays
         ? parsed.allowedWeekdays.map(d => `${d}曜`).join("・")
-        : "毎日";
+        : parsed.excludedWeekdays && parsed.excludedWeekdays.length > 0
+          ? `毎日（${parsed.excludedWeekdays.map(d => `${d}曜`).join("・")}を除く）`
+          : "毎日";
   const rangeLabel = parsed.rangeStart && parsed.rangeEnd
     ? `${tokyoDateParts(parsed.rangeStart).month}月${tokyoDateParts(parsed.rangeStart).day}日から${tokyoDateParts(new Date(parsed.rangeEnd.getTime() - 1)).month}月${tokyoDateParts(new Date(parsed.rangeEnd.getTime() - 1)).day}日まで`
     : `今後${parsed.horizonDays}日以内`;
