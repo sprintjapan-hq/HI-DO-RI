@@ -77,22 +77,82 @@ function parseCondition(condition, now) {
   const endTimeMinutes = endHour * 60 + endMinute;
 
   // Parse weekday constraints
-  const excludeWeekend = condition.includes("土日を除く") || condition.includes("週末を除く");
   const weekdayNames = ["日", "月", "火", "水", "木", "金", "土"];
   const allowedWeekdays = new Set();
+  const excludedWeekdays = new Set();
   
-  // Check for specific weekdays: 月水金, 火曜と木曜, 毎週火木, etc.
-  const specificDaysPattern = /([月火水木金土日])([曜、・と\s]*)/g;
-  const specificMatches = Array.from(condition.matchAll(specificDaysPattern));
-  if (specificMatches.length > 0 && !condition.includes("毎日")) {
-    for (const match of specificMatches) {
-      allowedWeekdays.add(match[1]);
+  // Check for explicit exclusions: X曜を除く、X除く、X以外
+  const exclusionPattern = /([月火水木金土日])曜?(?:を)?(?:除く|以外)/g;
+  let exclusionMatch;
+  while ((exclusionMatch = exclusionPattern.exec(condition)) !== null) {
+    excludedWeekdays.add(exclusionMatch[1]);
+  }
+  
+  // Check for weekday ranges: 月曜〜水曜、月-金
+  const rangePattern = /([月火水木金土日])曜?[〜～\-–—]([月火水木金土日])曜?/g;
+  let rangeMatch;
+  while ((rangeMatch = rangePattern.exec(condition)) !== null) {
+    const startDay = rangeMatch[1];
+    const endDay = rangeMatch[2];
+    const startIdx = weekdayNames.indexOf(startDay);
+    const endIdx = weekdayNames.indexOf(endDay);
+    if (startIdx !== -1 && endIdx !== -1) {
+      // Include all days in range
+      if (startIdx <= endIdx) {
+        for (let i = startIdx; i <= endIdx; i++) {
+          allowedWeekdays.add(weekdayNames[i]);
+        }
+      } else {
+        // Wrap around (e.g., 金-月)
+        for (let i = startIdx; i < weekdayNames.length; i++) {
+          allowedWeekdays.add(weekdayNames[i]);
+        }
+        for (let i = 0; i <= endIdx; i++) {
+          allowedWeekdays.add(weekdayNames[i]);
+        }
+      }
     }
   }
-
-  const dayType = excludeWeekend || condition.includes("平日")
+  
+  // Check for specific weekdays: only when followed by 曜 or in runs like 月水金/火・木/火と木
+  // Explicitly followed by 曜
+  const explicitPattern = /([月火水木金土日])曜/g;
+  let explicitMatch;
+  while ((explicitMatch = explicitPattern.exec(condition)) !== null) {
+    // Make sure it's not part of 曜日
+    const beforeIdx = explicitMatch.index - 1;
+    if (beforeIdx >= 0 && condition[beforeIdx] === '曜') continue;
+    allowedWeekdays.add(explicitMatch[1]);
+  }
+  
+  // Runs of weekday chars (月水金, 火・木, 火と木) - not preceded by digit or inside certain words
+  const runPattern = /(?<![0-9０-９明来今毎曜])([月火水木金土日])(?:[・、と\s]*([月火水木金土日]))+/g;
+  let runMatch;
+  while ((runMatch = runPattern.exec(condition)) !== null) {
+    // Extract all weekday characters from this match
+    const runText = runMatch[0];
+    for (const char of runText) {
+      if (weekdayNames.includes(char)) {
+        allowedWeekdays.add(char);
+      }
+    }
+  }
+  
+  // Handle exclusions
+  const excludeWeekend = condition.includes("土日を除く") || condition.includes("週末を除く");
+  if (excludeWeekend) {
+    excludedWeekdays.add("土");
+    excludedWeekdays.add("日");
+  }
+  
+  // Apply exclusions
+  for (const day of excludedWeekdays) {
+    allowedWeekdays.delete(day);
+  }
+  
+  const dayType = condition.includes("平日") || excludeWeekend
     ? "weekday"
-    : condition.includes("土日") || condition.includes("週末")
+    : (condition.includes("土日") || condition.includes("週末")) && !excludeWeekend
       ? "weekend"
       : allowedWeekdays.size > 0
         ? "specific"
@@ -380,6 +440,7 @@ function parseCondition(condition, now) {
       endTimeMinutes,
       dayType,
       allowedWeekdays: allowedWeekdays.size > 0 ? Array.from(allowedWeekdays) : undefined,
+      excludedWeekdays: excludedWeekdays.size > 0 ? Array.from(excludedWeekdays) : undefined,
       horizonDays,
       rangeStart: null,
       rangeEnd: null,
@@ -394,6 +455,7 @@ function parseCondition(condition, now) {
     endTimeMinutes,
     dayType,
     allowedWeekdays: allowedWeekdays.size > 0 ? Array.from(allowedWeekdays) : undefined,
+    excludedWeekdays: excludedWeekdays.size > 0 ? Array.from(excludedWeekdays) : undefined,
     horizonDays,
     rangeStart,
     rangeEnd,
@@ -745,4 +807,82 @@ test("parseCondition - 既存の平日・土日・毎日が引き続き動作", 
   
   const everydayResult = parseCondition("毎日", FIXED_NOW);
   assert.strictEqual(everydayResult?.dayType, "all", "毎日");
+});
+
+// 回帰テスト: 日付内の曜日文字を誤検出しない
+test("parseCondition - 2026年11月2日から11月13日の午後（全日として扱う）", () => {
+  const result = parseCondition("2026年11月2日から11月13日の午後", FIXED_NOW);
+  assert.ok(result, "結果がnullではない");
+  assert.strictEqual(result.invalidDateRange, false, "有効な日付範囲");
+  assert.strictEqual(result.dayType, "all", "全日（曜日指定なし）");
+  assert.strictEqual(result.allowedWeekdays, undefined, "allowedWeekdaysは未定義");
+  assert.strictEqual(formatDateRange(result.rangeStart, result.rangeEnd), "2026/11/2-2026/11/13");
+});
+
+test("parseCondition - 明日の午後（全日として扱う）", () => {
+  const result = parseCondition("明日の午後", FIXED_NOW);
+  assert.ok(result, "結果がnullではない");
+  assert.strictEqual(result.invalidDateRange, false, "有効な日付");
+  assert.strictEqual(result.dayType, "all", "全日（曜日指定なし）");
+  assert.strictEqual(result.allowedWeekdays, undefined, "allowedWeekdaysは未定義");
+  assert.strictEqual(formatDateRange(result.rangeStart, result.rangeEnd), "2026/10/11-2026/10/11");
+});
+
+test("parseCondition - 来月の午後（全日として扱う）", () => {
+  const result = parseCondition("来月の午後", FIXED_NOW);
+  assert.ok(result, "結果がnullではない");
+  assert.strictEqual(result.invalidDateRange, false, "有効な日付範囲");
+  assert.strictEqual(result.dayType, "all", "全日（曜日指定なし）");
+  assert.strictEqual(result.allowedWeekdays, undefined, "allowedWeekdaysは未定義");
+  assert.strictEqual(formatDateRange(result.rangeStart, result.rangeEnd), "2026/11/1-2026/11/30");
+});
+
+test("parseCondition - 今月末までの午後（全日として扱う）", () => {
+  const result = parseCondition("今月末までの午後", FIXED_NOW);
+  assert.ok(result, "結果がnullではない");
+  assert.strictEqual(result.invalidDateRange, false, "有効な日付範囲");
+  assert.strictEqual(result.dayType, "all", "全日（曜日指定なし）");
+  assert.strictEqual(result.allowedWeekdays, undefined, "allowedWeekdaysは未定義");
+});
+
+test("parseCondition - 水曜日の午後（水曜のみ）", () => {
+  const result = parseCondition("水曜日の午後", FIXED_NOW);
+  assert.ok(result, "結果がnullではない");
+  assert.strictEqual(result.dayType, "specific", "特定の曜日");
+  assert.ok(result.allowedWeekdays, "allowedWeekdaysが設定されている");
+  assert.deepStrictEqual([...result.allowedWeekdays].sort(), ["水"], "水曜のみ");
+});
+
+test("parseCondition - 日曜除く（日曜以外）", () => {
+  const result = parseCondition("日曜除く", FIXED_NOW);
+  assert.ok(result, "結果がnullではない");
+  assert.strictEqual(result.dayType, "all", "全日基準");
+  assert.ok(result.excludedWeekdays, "excludedWeekdaysが設定されている");
+  assert.deepStrictEqual(result.excludedWeekdays, ["日"], "日曜が除外されている");
+});
+
+test("parseCondition - 月曜〜水曜の範囲（月火水）", () => {
+  const result = parseCondition("月曜〜水曜の午後", FIXED_NOW);
+  assert.ok(result, "結果がnullではない");
+  assert.strictEqual(result.dayType, "specific", "特定の曜日");
+  assert.ok(result.allowedWeekdays, "allowedWeekdaysが設定されている");
+  const days = new Set(result.allowedWeekdays);
+  assert.ok(days.has("月"), "月が含まれる");
+  assert.ok(days.has("火"), "火が含まれる");
+  assert.ok(days.has("水"), "水が含まれる");
+  assert.strictEqual(days.size, 3, "3つの曜日");
+});
+
+test("parseCondition - 月-金の範囲（月〜金）", () => {
+  const result = parseCondition("月-金の午後", FIXED_NOW);
+  assert.ok(result, "結果がnullではない");
+  assert.strictEqual(result.dayType, "specific", "特定の曜日");
+  assert.ok(result.allowedWeekdays, "allowedWeekdaysが設定されている");
+  const days = new Set(result.allowedWeekdays);
+  assert.ok(days.has("月"), "月が含まれる");
+  assert.ok(days.has("火"), "火が含まれる");
+  assert.ok(days.has("水"), "水が含まれる");
+  assert.ok(days.has("木"), "木が含まれる");
+  assert.ok(days.has("金"), "金が含まれる");
+  assert.strictEqual(days.size, 5, "5つの曜日");
 });

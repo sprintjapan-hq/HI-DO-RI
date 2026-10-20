@@ -109,22 +109,82 @@ function parseCondition(condition: string, now: Date) {
   const endTimeMinutes = endHour * 60 + endMinute;
 
   // Parse weekday constraints
-  const excludeWeekend = condition.includes("土日を除く") || condition.includes("週末を除く");
   const weekdayNames = ["日", "月", "火", "水", "木", "金", "土"];
   const allowedWeekdays = new Set<string>();
+  const excludedWeekdays = new Set<string>();
   
-  // Check for specific weekdays: 月水金, 火曜と木曜, 毎週火木, etc.
-  const specificDaysPattern = /([月火水木金土日])([曜、・と\s]*)/g;
-  const specificMatches = Array.from(condition.matchAll(specificDaysPattern));
-  if (specificMatches.length > 0 && !condition.includes("毎日")) {
-    for (const match of specificMatches) {
-      allowedWeekdays.add(match[1]);
+  // Check for explicit exclusions: X曜を除く、X除く、X以外
+  const exclusionPattern = /([月火水木金土日])曜?(?:を)?(?:除く|以外)/g;
+  let exclusionMatch;
+  while ((exclusionMatch = exclusionPattern.exec(condition)) !== null) {
+    excludedWeekdays.add(exclusionMatch[1]);
+  }
+  
+  // Check for weekday ranges: 月曜〜水曜、月-金
+  const rangePattern = /([月火水木金土日])曜?[〜～\-–—]([月火水木金土日])曜?/g;
+  let rangeMatch;
+  while ((rangeMatch = rangePattern.exec(condition)) !== null) {
+    const startDay = rangeMatch[1];
+    const endDay = rangeMatch[2];
+    const startIdx = weekdayNames.indexOf(startDay);
+    const endIdx = weekdayNames.indexOf(endDay);
+    if (startIdx !== -1 && endIdx !== -1) {
+      // Include all days in range
+      if (startIdx <= endIdx) {
+        for (let i = startIdx; i <= endIdx; i++) {
+          allowedWeekdays.add(weekdayNames[i]);
+        }
+      } else {
+        // Wrap around (e.g., 金-月)
+        for (let i = startIdx; i < weekdayNames.length; i++) {
+          allowedWeekdays.add(weekdayNames[i]);
+        }
+        for (let i = 0; i <= endIdx; i++) {
+          allowedWeekdays.add(weekdayNames[i]);
+        }
+      }
     }
   }
-
-  const dayType = excludeWeekend || condition.includes("平日")
+  
+  // Check for specific weekdays: only when followed by 曜 or in runs like 月水金/火・木/火と木
+  // Explicitly followed by 曜
+  const explicitPattern = /([月火水木金土日])曜/g;
+  let explicitMatch;
+  while ((explicitMatch = explicitPattern.exec(condition)) !== null) {
+    // Make sure it's not part of 曜日
+    const beforeIdx = explicitMatch.index - 1;
+    if (beforeIdx >= 0 && condition[beforeIdx] === '曜') continue;
+    allowedWeekdays.add(explicitMatch[1]);
+  }
+  
+  // Runs of weekday chars (月水金, 火・木, 火と木) - not preceded by digit or inside certain words
+  const runPattern = /(?<![0-9０-９明来今毎曜])([月火水木金土日])(?:[・、と\s]*([月火水木金土日]))+/g;
+  let runMatch;
+  while ((runMatch = runPattern.exec(condition)) !== null) {
+    // Extract all weekday characters from this match
+    const runText = runMatch[0];
+    for (const char of runText) {
+      if (weekdayNames.includes(char)) {
+        allowedWeekdays.add(char);
+      }
+    }
+  }
+  
+  // Handle exclusions
+  const excludeWeekend = condition.includes("土日を除く") || condition.includes("週末を除く");
+  if (excludeWeekend) {
+    excludedWeekdays.add("土");
+    excludedWeekdays.add("日");
+  }
+  
+  // Apply exclusions
+  for (const day of excludedWeekdays) {
+    allowedWeekdays.delete(day);
+  }
+  
+  const dayType = condition.includes("平日") || excludeWeekend
     ? "weekday"
-    : condition.includes("土日") || condition.includes("週末")
+    : (condition.includes("土日") || condition.includes("週末")) && !excludeWeekend
       ? "weekend"
       : allowedWeekdays.size > 0
         ? "specific"
@@ -384,6 +444,7 @@ function parseCondition(condition: string, now: Date) {
       endTimeMinutes,
       dayType,
       allowedWeekdays: allowedWeekdays.size > 0 ? Array.from(allowedWeekdays) : undefined,
+      excludedWeekdays: excludedWeekdays.size > 0 ? Array.from(excludedWeekdays) : undefined,
       horizonDays,
       rangeStart: null,
       rangeEnd: null,
@@ -398,6 +459,7 @@ function parseCondition(condition: string, now: Date) {
     endTimeMinutes,
     dayType,
     allowedWeekdays: allowedWeekdays.size > 0 ? Array.from(allowedWeekdays) : undefined,
+    excludedWeekdays: excludedWeekdays.size > 0 ? Array.from(excludedWeekdays) : undefined,
     horizonDays,
     rangeStart,
     rangeEnd,
@@ -543,6 +605,7 @@ router.post(["/calendar/candidates", "/calendar-preview/candidates"], async (req
     if (parsed.dayType === "weekday" && (weekday === "土" || weekday === "日")) continue;
     if (parsed.dayType === "weekend" && weekday !== "土" && weekday !== "日") continue;
     if (parsed.dayType === "specific" && parsed.allowedWeekdays && !parsed.allowedWeekdays.includes(weekday)) continue;
+    if (parsed.excludedWeekdays && parsed.excludedWeekdays.includes(weekday)) continue;
 
     for (
       let startTimeMinutes = parsed.startHour * 60 + parsed.startMinute;
