@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseCondition, generateCandidateSlots } from "../src/routes/condition-parser.ts";
+import { parseCondition, generateCandidateSlots, selectFreeSlots, tokyoOffsetDate } from "../src/routes/condition-parser.ts";
 
 /**
  * parseCondition のテスト
@@ -582,7 +582,7 @@ test("generateCandidateSlots: busyで最初の枠が埋まっていても残り�
   const parsed = parseCondition("平日 14:00から18:00 1時間", now);
   assert.ok(parsed);
   
-  // 全候補を生成（limitなし）
+  // 全候補を生成
   const allSlots = generateCandidateSlots(parsed, now);
   assert.ok(allSlots.length >= 20, "十分な候補が生成される");
   
@@ -595,31 +595,29 @@ test("generateCandidateSlots: busyで最初の枠が埋まっていても残り�
     return { start: start.toISOString(), end: end.toISOString() };
   });
   
-  // busyと重ならない枠をフィルタリング
-  const tokyoOffsetDate = (year, month, day, hour) => {
-    return new Date(`${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}T${String(hour).padStart(2, "0")}:00:00+09:00`);
-  };
+  // selectFreeSlotsを使ってbusyと重ならない枠を取得
+  const freeSlots = selectFreeSlots(allSlots, busy, parsed, 10);
   
-  const availableSlots = allSlots.filter(slot => {
-    const start = tokyoOffsetDate(slot.year, slot.month, slot.day, slot.startHour);
-    const startWithMinutes = new Date(start.getTime() + slot.startMinute * 60 * 1000);
-    const end = new Date(startWithMinutes.getTime() + parsed.durationMinutes * 60 * 1000);
-    
-    const overlaps = busy.some((period) => 
-      new Date(period.start) < end && new Date(period.end) > startWithMinutes
-    );
-    return !overlaps;
-  });
-  
-  // 最初の5個が除外されて、残りから10件取れることを確認
-  assert.ok(availableSlots.length >= 10, "busy除外後も10件以上ある");
-  const result = availableSlots.slice(0, 10);
-  assert.strictEqual(result.length, 10, "10件取れる");
+  // 10件取れることを確認
+  assert.strictEqual(freeSlots.length, 10, "10件取れる");
   
   // 結果が最初の5個と重ならないことを確認
   const firstFiveIds = allSlots.slice(0, 5).map(s => `${s.year}-${s.month}-${s.day}-${s.startHour}-${s.startMinute}`);
-  result.forEach(slot => {
+  freeSlots.forEach(slot => {
     const id = `${slot.year}-${slot.month}-${slot.day}-${slot.startHour}-${slot.startMinute}`;
     assert.ok(!firstFiveIds.includes(id), `枠 ${id} は最初の5個に含まれない`);
+  });
+  
+  // 予定と重なる枠が1つも入らないことを確認
+  freeSlots.forEach(slot => {
+    const start = new Date(
+      Date.UTC(slot.year, slot.month - 1, slot.day, slot.startHour - 9, slot.startMinute)
+    );
+    const end = new Date(start.getTime() + parsed.durationMinutes * 60 * 1000);
+    
+    const overlaps = busy.some(period => 
+      new Date(period.start) < end && new Date(period.end) > start
+    );
+    assert.ok(!overlaps, `枠 ${slot.year}/${slot.month}/${slot.day} ${slot.startHour}:${slot.startMinute} はbusyと重ならない`);
   });
 });

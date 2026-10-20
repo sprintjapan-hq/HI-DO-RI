@@ -16,7 +16,7 @@ import {
   GOOGLE_CALENDAR_TIME_ZONE,
   synchronizePollCalendarEvents,
 } from "../lib/google-calendar";
-import { parseCondition, generateCandidateSlots } from "./condition-parser";
+import { parseCondition, generateCandidateSlots, selectFreeSlots } from "./condition-parser";
 
 const router: IRouter = Router();
 const TIME_ZONE = GOOGLE_CALENDAR_TIME_ZONE;
@@ -190,25 +190,20 @@ router.post(["/calendar/candidates", "/calendar-preview/candidates"], async (req
   // Generate all candidate slots (without limit)
   const candidateSlots = generateCandidateSlots(parsed, now);
   
-  const slots: Array<{ label: string; start: string; end: string }> = [];
-  
   // Filter out busy slots and take first 'limit' slots
-  for (const slot of candidateSlots) {
+  const freeSlots = selectFreeSlots(candidateSlots, busy, parsed, limit);
+  
+  const slots: Array<{ label: string; start: string; end: string }> = freeSlots.map(slot => {
     const start = tokyoOffsetDate(slot.year, slot.month, slot.day, slot.startHour);
     const startWithMinutes = new Date(start.getTime() + slot.startMinute * 60 * 1000);
     const end = new Date(startWithMinutes.getTime() + parsed.durationMinutes * 60 * 1000);
     
-    const overlaps = busy.some((period) => new Date(period.start) < end && new Date(period.end) > startWithMinutes);
-    if (overlaps) continue;
-    
-    slots.push({
+    return {
       label: `${slot.year}/${slot.month}/${slot.day}(${slot.weekday}) ${String(slot.startHour).padStart(2, "0")}:${String(slot.startMinute).padStart(2, "0")}〜${String(slot.endHour).padStart(2, "0")}:${String(slot.endMinute).padStart(2, "0")}`,
       start: startWithMinutes.toISOString(),
       end: end.toISOString(),
-    });
-    
-    if (slots.length >= limit) break;
-  }
+    };
+  });
 
   const dayLabel = parsed.dayType === "weekday" 
     ? "平日" 

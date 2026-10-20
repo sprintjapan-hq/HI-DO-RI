@@ -11,7 +11,7 @@ function tokyoDateParts(date: Date) {
   return Object.fromEntries(parts.map((part) => [part.type, part.value]));
 }
 
-function tokyoOffsetDate(year: number, month: number, day: number, hour: number) {
+export function tokyoOffsetDate(year: number, month: number, day: number, hour: number) {
   return new Date(`${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}T${String(hour).padStart(2, "0")}:00:00+09:00`);
 }
 
@@ -494,4 +494,37 @@ export function generateCandidateSlots(
   }
 
   return slots;
+}
+
+export type BusyPeriod = {
+  start: string;
+  end: string;
+};
+
+export function selectFreeSlots(
+  slots: TimeSlot[],
+  busy: BusyPeriod[],
+  parsed: ParsedCondition,
+  limit: number = 10
+): TimeSlot[] {
+  if (!parsed) return [];
+  
+  const freeSlots: TimeSlot[] = [];
+  
+  for (const slot of slots) {
+    const start = tokyoOffsetDate(slot.year, slot.month, slot.day, slot.startHour);
+    const startWithMinutes = new Date(start.getTime() + slot.startMinute * 60 * 1000);
+    const end = new Date(startWithMinutes.getTime() + parsed.durationMinutes * 60 * 1000);
+    
+    const overlaps = busy.some((period) => 
+      new Date(period.start) < end && new Date(period.end) > startWithMinutes
+    );
+    
+    if (!overlaps) {
+      freeSlots.push(slot);
+      if (freeSlots.length >= limit) break;
+    }
+  }
+  
+  return freeSlots;
 }
