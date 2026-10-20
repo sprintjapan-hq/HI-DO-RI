@@ -502,19 +502,17 @@ export type BusyPeriod = {
 };
 
 export function selectFreeSlots(
-  slots: TimeSlot[],
+  candidates: TimeSlot[],
   busy: BusyPeriod[],
-  parsed: ParsedCondition,
+  durationMinutes: number,
   limit: number = 10
 ): TimeSlot[] {
-  if (!parsed) return [];
-  
   const freeSlots: TimeSlot[] = [];
   
-  for (const slot of slots) {
+  for (const slot of candidates) {
     const start = tokyoOffsetDate(slot.year, slot.month, slot.day, slot.startHour);
     const startWithMinutes = new Date(start.getTime() + slot.startMinute * 60 * 1000);
-    const end = new Date(startWithMinutes.getTime() + parsed.durationMinutes * 60 * 1000);
+    const end = new Date(startWithMinutes.getTime() + durationMinutes * 60 * 1000);
     
     const overlaps = busy.some((period) => 
       new Date(period.start) < end && new Date(period.end) > startWithMinutes

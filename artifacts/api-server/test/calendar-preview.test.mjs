@@ -596,7 +596,7 @@ test("generateCandidateSlots: busyで最初の枠が埋まっていても残り�
   });
   
   // selectFreeSlotsを使ってbusyと重ならない枠を取得
-  const freeSlots = selectFreeSlots(allSlots, busy, parsed, 10);
+  const freeSlots = selectFreeSlots(allSlots, busy, parsed.durationMinutes, 10);
   
   // 10件取れることを確認
   assert.strictEqual(freeSlots.length, 10, "10件取れる");

@@ -191,7 +191,7 @@ router.post(["/calendar/candidates", "/calendar-preview/candidates"], async (req
   const candidateSlots = generateCandidateSlots(parsed, now);
   
   // Filter out busy slots and take first 'limit' slots
-  const freeSlots = selectFreeSlots(candidateSlots, busy, parsed, limit);
+  const freeSlots = selectFreeSlots(candidateSlots, busy, parsed.durationMinutes, limit);
   
   const slots: Array<{ label: string; start: string; end: string }> = freeSlots.map(slot => {
     const start = tokyoOffsetDate(slot.year, slot.month, slot.day, slot.startHour);
