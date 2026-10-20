@@ -75,11 +75,28 @@ function parseCondition(condition, now) {
   const endMinute = Number(timeRangeMatch?.[6] ?? 0);
   const startTimeMinutes = startHour * 60 + startMinute;
   const endTimeMinutes = endHour * 60 + endMinute;
-  const dayType = condition.includes("土日") || condition.includes("週末")
-    ? "weekend"
-    : condition.includes("平日")
-      ? "weekday"
-      : "all";
+
+  // Parse weekday constraints
+  const excludeWeekend = condition.includes("土日を除く") || condition.includes("週末を除く");
+  const weekdayNames = ["日", "月", "火", "水", "木", "金", "土"];
+  const allowedWeekdays = new Set();
+  
+  // Check for specific weekdays: 月水金, 火曜と木曜, 毎週火木, etc.
+  const specificDaysPattern = /([月火水木金土日])([曜、・と\s]*)/g;
+  const specificMatches = Array.from(condition.matchAll(specificDaysPattern));
+  if (specificMatches.length > 0 && !condition.includes("毎日")) {
+    for (const match of specificMatches) {
+      allowedWeekdays.add(match[1]);
+    }
+  }
+
+  const dayType = excludeWeekend || condition.includes("平日")
+    ? "weekday"
+    : condition.includes("土日") || condition.includes("週末")
+      ? "weekend"
+      : allowedWeekdays.size > 0
+        ? "specific"
+        : "all";
 
   const nowParts = tokyoDateParts(now);
   const currentYear = Number(nowParts.year);
@@ -158,7 +175,9 @@ function parseCondition(condition, now) {
       rangeStart = tokyoOffsetDate(startYear, startMonth, startDay, 0);
       const inclusiveRangeEnd = tokyoOffsetDate(endYear, endMonth, endDay, 0);
 
-      if (!japaneseRangeMatch[1] && rangeStart < now) {
+      // Compare by date, not timestamp, to allow ranges starting today
+      const nowDateOnly = tokyoOffsetDate(currentYear, currentMonth, currentDay, 0);
+      if (!japaneseRangeMatch[1] && rangeStart < nowDateOnly) {
         rangeStart = tokyoOffsetDate(currentYear + 1, startMonth, startDay, 0);
       }
       if (!japaneseRangeMatch[5] && inclusiveRangeEnd < rangeStart) {
@@ -257,8 +276,9 @@ function parseCondition(condition, now) {
       rangeStart = tokyoOffsetDate(currentYear, startMonth, startDay, 0);
       let inclusiveRangeEnd = tokyoOffsetDate(currentYear, endMonth, endDay, 0);
 
-      // Only adjust to next year if the date is in the past (no explicit year)
-      if (rangeStart < now) {
+      // Compare by date, not timestamp, to allow ranges starting today
+      const nowDateOnly = tokyoOffsetDate(currentYear, currentMonth, currentDay, 0);
+      if (rangeStart < nowDateOnly) {
         rangeStart = tokyoOffsetDate(currentYear + 1, startMonth, startDay, 0);
         inclusiveRangeEnd = tokyoOffsetDate(currentYear + 1, endMonth, endDay, 0);
       }
@@ -315,8 +335,9 @@ function parseCondition(condition, now) {
     if (!invalidDateRange) {
       rangeStart = tokyoOffsetDate(year, month, day, 0);
 
-      // If no year was specified and the date is in the past, move to next year
-      if (!singleJapaneseDateMatch?.[1] && !fullSingleSlashMatch && rangeStart < now) {
+      // Compare by date, not timestamp, to allow ranges starting today
+      const nowDateOnly = tokyoOffsetDate(currentYear, currentMonth, currentDay, 0);
+      if (!singleJapaneseDateMatch?.[1] && !fullSingleSlashMatch && rangeStart < nowDateOnly) {
         rangeStart = tokyoOffsetDate(currentYear + 1, month, day, 0);
       }
 
@@ -358,6 +379,7 @@ function parseCondition(condition, now) {
       startMinute,
       endTimeMinutes,
       dayType,
+      allowedWeekdays: allowedWeekdays.size > 0 ? Array.from(allowedWeekdays) : undefined,
       horizonDays,
       rangeStart: null,
       rangeEnd: null,
@@ -371,6 +393,7 @@ function parseCondition(condition, now) {
     startMinute,
     endTimeMinutes,
     dayType,
+    allowedWeekdays: allowedWeekdays.size > 0 ? Array.from(allowedWeekdays) : undefined,
     horizonDays,
     rangeStart,
     rangeEnd,
@@ -660,4 +683,66 @@ test("parseCondition - 10/20-10/25までの平日（までのが動作）", () =
   assert.ok(result, "結果がnullではない");
   assert.strictEqual(result.dayType, "weekday", "平日");
   assert.ok(result.rangeStart, "日付範囲が設定されている");
+});
+
+// 曜日指定の新しいテストケース
+test("parseCondition - 毎週火曜と木曜", () => {
+  const result = parseCondition("2026/11/2-11/13の毎週火曜と木曜の午後、1時間枠", FIXED_NOW);
+  assert.ok(result, "結果がnullではない");
+  assert.strictEqual(result.invalidDateRange, false, "有効な日付範囲");
+  assert.strictEqual(result.dayType, "specific", "特定の曜日");
+  assert.ok(result.allowedWeekdays, "allowedWeekdaysが設定されている");
+  assert.ok(result.allowedWeekdays.includes("火"), "火曜が含まれる");
+  assert.ok(result.allowedWeekdays.includes("木"), "木曜が含まれる");
+  assert.strictEqual(result.allowedWeekdays.length, 2, "2つの曜日のみ");
+  assert.strictEqual(formatDateRange(result.rangeStart, result.rangeEnd), "2026/11/2-2026/11/13");
+  assert.strictEqual(result.startHour, 13, "午後の開始時刻");
+  assert.strictEqual(result.durationMinutes, 60, "1時間枠");
+});
+
+test("parseCondition - 月水金", () => {
+  const result = parseCondition("2026/11/2-11/13の月水金の10:00-12:00、1時間枠", FIXED_NOW);
+  assert.ok(result, "結果がnullではない");
+  assert.strictEqual(result.invalidDateRange, false, "有効な日付範囲");
+  assert.strictEqual(result.dayType, "specific", "特定の曜日");
+  assert.ok(result.allowedWeekdays, "allowedWeekdaysが設定されている");
+  assert.ok(result.allowedWeekdays.includes("月"), "月曜が含まれる");
+  assert.ok(result.allowedWeekdays.includes("水"), "水曜が含まれる");
+  assert.ok(result.allowedWeekdays.includes("金"), "金曜が含まれる");
+  assert.strictEqual(result.allowedWeekdays.length, 3, "3つの曜日のみ");
+  assert.strictEqual(formatDateRange(result.rangeStart, result.rangeEnd), "2026/11/2-2026/11/13");
+  assert.strictEqual(result.startHour, 10, "開始時刻");
+  assert.strictEqual(result.endTimeMinutes, 12 * 60, "終了時刻");
+});
+
+test("parseCondition - 土日を除く", () => {
+  const result = parseCondition("2026/11/2-11/13、土日を除く、13:00-15:00、1時間枠", FIXED_NOW);
+  assert.ok(result, "結果がnullではない");
+  assert.strictEqual(result.invalidDateRange, false, "有効な日付範囲");
+  assert.strictEqual(result.dayType, "weekday", "平日（土日を除く）");
+  assert.strictEqual(formatDateRange(result.rangeStart, result.rangeEnd), "2026/11/2-2026/11/13");
+  assert.strictEqual(result.startHour, 13, "開始時刻");
+  assert.strictEqual(result.endTimeMinutes, 15 * 60, "終了時刻");
+});
+
+// 今日開始の範囲テスト（FIXED_NOW は 2026/10/10）
+test("parseCondition - 今日開始の範囲は今年として扱う", () => {
+  const result = parseCondition("10/10-10/15の午後3時間枠", FIXED_NOW);
+  assert.ok(result, "結果がnullではない");
+  assert.strictEqual(result.invalidDateRange, false, "有効な日付範囲");
+  // 10/10 は FIXED_NOW の日付なので、今年 (2026) として扱う
+  assert.strictEqual(formatDateRange(result.rangeStart, result.rangeEnd), "2026/10/10-2026/10/15");
+  assert.strictEqual(result.startHour, 13, "午後の開始");
+  assert.strictEqual(result.durationMinutes, 180, "3時間枠");
+});
+
+test("parseCondition - 既存の平日・土日・毎日が引き続き動作", () => {
+  const weekdayResult = parseCondition("平日", FIXED_NOW);
+  assert.strictEqual(weekdayResult?.dayType, "weekday", "平日");
+  
+  const weekendResult = parseCondition("土日", FIXED_NOW);
+  assert.strictEqual(weekendResult?.dayType, "weekend", "土日");
+  
+  const everydayResult = parseCondition("毎日", FIXED_NOW);
+  assert.strictEqual(everydayResult?.dayType, "all", "毎日");
 });

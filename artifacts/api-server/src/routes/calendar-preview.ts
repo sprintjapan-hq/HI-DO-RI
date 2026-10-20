@@ -107,11 +107,28 @@ function parseCondition(condition: string, now: Date) {
   const endMinute = Number(timeRangeMatch?.[6] ?? 0);
   const startTimeMinutes = startHour * 60 + startMinute;
   const endTimeMinutes = endHour * 60 + endMinute;
-  const dayType = condition.includes("土日") || condition.includes("週末")
-    ? "weekend"
-    : condition.includes("平日")
-      ? "weekday"
-      : "all";
+
+  // Parse weekday constraints
+  const excludeWeekend = condition.includes("土日を除く") || condition.includes("週末を除く");
+  const weekdayNames = ["日", "月", "火", "水", "木", "金", "土"];
+  const allowedWeekdays = new Set<string>();
+  
+  // Check for specific weekdays: 月水金, 火曜と木曜, 毎週火木, etc.
+  const specificDaysPattern = /([月火水木金土日])([曜、・と\s]*)/g;
+  const specificMatches = Array.from(condition.matchAll(specificDaysPattern));
+  if (specificMatches.length > 0 && !condition.includes("毎日")) {
+    for (const match of specificMatches) {
+      allowedWeekdays.add(match[1]);
+    }
+  }
+
+  const dayType = excludeWeekend || condition.includes("平日")
+    ? "weekday"
+    : condition.includes("土日") || condition.includes("週末")
+      ? "weekend"
+      : allowedWeekdays.size > 0
+        ? "specific"
+        : "all";
 
   const nowParts = tokyoDateParts(now);
   const currentYear = Number(nowParts.year);
@@ -190,7 +207,9 @@ function parseCondition(condition: string, now: Date) {
       rangeStart = tokyoOffsetDate(startYear, startMonth, startDay, 0);
       const inclusiveRangeEnd = tokyoOffsetDate(endYear, endMonth, endDay, 0);
 
-      if (!japaneseRangeMatch[1] && rangeStart < now) {
+      // Compare by date, not timestamp, to allow ranges starting today
+      const nowDateOnly = tokyoOffsetDate(currentYear, currentMonth, currentDay, 0);
+      if (!japaneseRangeMatch[1] && rangeStart < nowDateOnly) {
         rangeStart = tokyoOffsetDate(currentYear + 1, startMonth, startDay, 0);
       }
       if (!japaneseRangeMatch[5] && inclusiveRangeEnd < rangeStart) {
@@ -261,8 +280,9 @@ function parseCondition(condition: string, now: Date) {
       rangeStart = tokyoOffsetDate(currentYear, startMonth, startDay, 0);
       let inclusiveRangeEnd = tokyoOffsetDate(currentYear, endMonth, endDay, 0);
 
-      // Only adjust to next year if the date is in the past (no explicit year)
-      if (rangeStart < now) {
+      // Compare by date, not timestamp, to allow ranges starting today
+      const nowDateOnly = tokyoOffsetDate(currentYear, currentMonth, currentDay, 0);
+      if (rangeStart < nowDateOnly) {
         rangeStart = tokyoOffsetDate(currentYear + 1, startMonth, startDay, 0);
         inclusiveRangeEnd = tokyoOffsetDate(currentYear + 1, endMonth, endDay, 0);
       }
@@ -319,8 +339,9 @@ function parseCondition(condition: string, now: Date) {
     if (!invalidDateRange) {
       rangeStart = tokyoOffsetDate(year, month, day, 0);
 
-      // If no year was specified and the date is in the past, move to next year
-      if (!singleJapaneseDateMatch?.[1] && !fullSingleSlashMatch && rangeStart < now) {
+      // Compare by date, not timestamp, to allow ranges starting today
+      const nowDateOnly = tokyoOffsetDate(currentYear, currentMonth, currentDay, 0);
+      if (!singleJapaneseDateMatch?.[1] && !fullSingleSlashMatch && rangeStart < nowDateOnly) {
         rangeStart = tokyoOffsetDate(currentYear + 1, month, day, 0);
       }
 
@@ -362,6 +383,7 @@ function parseCondition(condition: string, now: Date) {
       startMinute,
       endTimeMinutes,
       dayType,
+      allowedWeekdays: allowedWeekdays.size > 0 ? Array.from(allowedWeekdays) : undefined,
       horizonDays,
       rangeStart: null,
       rangeEnd: null,
@@ -375,6 +397,7 @@ function parseCondition(condition: string, now: Date) {
     startMinute,
     endTimeMinutes,
     dayType,
+    allowedWeekdays: allowedWeekdays.size > 0 ? Array.from(allowedWeekdays) : undefined,
     horizonDays,
     rangeStart,
     rangeEnd,
@@ -515,8 +538,11 @@ router.post(["/calendar/candidates", "/calendar-preview/candidates"], async (req
     if (probe >= rangeEnd) break;
     const parts = tokyoDateParts(probe);
     const weekday = parts.weekday;
+    
+    // Apply weekday filters
     if (parsed.dayType === "weekday" && (weekday === "土" || weekday === "日")) continue;
     if (parsed.dayType === "weekend" && weekday !== "土" && weekday !== "日") continue;
+    if (parsed.dayType === "specific" && parsed.allowedWeekdays && !parsed.allowedWeekdays.includes(weekday)) continue;
 
     for (
       let startTimeMinutes = parsed.startHour * 60 + parsed.startMinute;
@@ -542,7 +568,13 @@ router.post(["/calendar/candidates", "/calendar-preview/candidates"], async (req
     }
   }
 
-  const dayLabel = parsed.dayType === "weekday" ? "平日" : parsed.dayType === "weekend" ? "土日" : "毎日";
+  const dayLabel = parsed.dayType === "weekday" 
+    ? "平日" 
+    : parsed.dayType === "weekend" 
+      ? "土日" 
+      : parsed.dayType === "specific" && parsed.allowedWeekdays
+        ? parsed.allowedWeekdays.map(d => `${d}曜`).join("・")
+        : "毎日";
   const rangeLabel = parsed.rangeStart && parsed.rangeEnd
     ? `${tokyoDateParts(parsed.rangeStart).month}月${tokyoDateParts(parsed.rangeStart).day}日から${tokyoDateParts(new Date(parsed.rangeEnd.getTime() - 1)).month}月${tokyoDateParts(new Date(parsed.rangeEnd.getTime() - 1)).day}日まで`
     : `今後${parsed.horizonDays}日以内`;
