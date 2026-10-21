@@ -125,13 +125,13 @@ test("年またぎ期間: 12/28-1/5を12/30に入力 → 今年12/28〜翌年1/5
   assert.strictEqual(formatDateRange(result.rangeStart, result.rangeEnd), "2026/12/28-2027/1/5", "今年12/28から翌年1/5");
 });
 
-test("年またぎ期間: 12/28-1/5を1/3に入力 → 前年12/28〜今年1/5（開始は1/3にそろえる）", () => {
+test("年またぎ期間: 12/28-1/5を1/3に入力 → 前年12/28〜今年1/5（開始日は12/28のまま）", () => {
   // 基準日: 2027年1月3日
   const now = new Date("2027-01-03T10:00:00+09:00");
   const result = parseCondition("12/28-1/5の午後", now);
   assert.ok(result, "結果がnullではない");
   assert.strictEqual(result.invalidDateRange, false, "有効な日付範囲");
   // 終わり1/5は未来なので今年として解釈。開始12/28は前年だが終わりが今年なので前年12/28
-  // ただし実際の候補生成時は今日1/3以降のみ
+  // 過ぎた日（12/28〜1/2）は候補生成時に落ちる
   assert.strictEqual(formatDateRange(result.rangeStart, result.rangeEnd), "2026/12/28-2027/1/5", "前年12/28から今年1/5");
 });
