@@ -112,7 +112,13 @@ export async function getGoogleAccess(userId: string) {
     const connection = await db.query.calendarConnectionsTable.findFirst({
       where: eq(calendarConnectionsTable.userId, userId),
     });
-    if (!connection) return { status: "disconnected" as const };
+    if (!connection) {
+      logger.info(
+        { userId },
+        "Google Calendar not connected: no connection record in database",
+      );
+      return { status: "disconnected" as const };
+    }
     const tokenResult = await clerkClient.users.getUserOauthAccessToken(
       userId,
       GOOGLE_PROVIDER,
@@ -120,10 +126,22 @@ export async function getGoogleAccess(userId: string) {
     const token = tokenResult.data.find(
       (item) => item.externalAccountId === connection.externalAccountId,
     );
-    if (
-      !token ||
-      !REQUIRED_SCOPES.every((scope) => token.scopes?.includes(scope))
-    ) {
+    if (!token) {
+      logger.info(
+        { userId, externalAccountId: connection.externalAccountId },
+        "Google Calendar not connected: no OAuth token from Clerk",
+      );
+      return { status: "disconnected" as const };
+    }
+    if (!REQUIRED_SCOPES.every((scope) => token.scopes?.includes(scope))) {
+      logger.info(
+        {
+          userId,
+          requiredScopes: REQUIRED_SCOPES,
+          presentScopes: token.scopes ?? [],
+        },
+        "Google Calendar not connected: token lacks required calendar.freebusy scope",
+      );
       return { status: "disconnected" as const };
     }
     return {
