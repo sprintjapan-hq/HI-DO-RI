@@ -222,19 +222,63 @@ export function parseCondition(condition: string, now: Date) {
       endMonth < 1 || endMonth > 12 || endDay < 1 || endDay > 31;
 
     if (!invalidDateRange) {
-      rangeStart = tokyoOffsetDate(startYear, startMonth, startDay, 0);
-      const inclusiveRangeEnd = tokyoOffsetDate(endYear, endMonth, endDay, 0);
-
-      // Compare by date, not timestamp, to allow ranges starting today
       const nowDateOnly = tokyoOffsetDate(currentYear, currentMonth, currentDay, 0);
-      if (!japaneseRangeMatch[1] && rangeStart < nowDateOnly) {
-        rangeStart = tokyoOffsetDate(currentYear + 1, startMonth, startDay, 0);
-      }
-      if (!japaneseRangeMatch[5] && inclusiveRangeEnd < rangeStart) {
-        const adjustedRangeEnd = tokyoOffsetDate(endYear + 1, endMonth, endDay, 0);
-        rangeEnd = new Date(adjustedRangeEnd.getTime() + 24 * 60 * 60 * 1000);
+      const isYearWrapping = !japaneseRangeMatch[5] && (endMonth < startMonth || (endMonth === startMonth && endDay < startDay));
+      
+      if (isYearWrapping && !japaneseRangeMatch[1]) {
+        // Year-wrapping range without explicit year (e.g., 12月28日〜1月5日)
+        if (currentMonth >= startMonth) {
+          // We're in the start month or later (e.g., now is 12/30, range is 12/28-1/5)
+          rangeStart = tokyoOffsetDate(currentYear, startMonth, startDay, 0);
+          const inclusiveRangeEnd = tokyoOffsetDate(currentYear + 1, endMonth, endDay, 0);
+          rangeEnd = new Date(inclusiveRangeEnd.getTime() + 24 * 60 * 60 * 1000);
+          
+          // If end is in the past, move entire range to next year
+          if (inclusiveRangeEnd < nowDateOnly) {
+            rangeStart = tokyoOffsetDate(currentYear + 1, startMonth, startDay, 0);
+            const newEnd = tokyoOffsetDate(currentYear + 2, endMonth, endDay, 0);
+            rangeEnd = new Date(newEnd.getTime() + 24 * 60 * 60 * 1000);
+          }
+        } else if (currentMonth <= endMonth) {
+          // We're in the end month or earlier (e.g., now is 1/3, range is 12/28-1/5)
+          rangeStart = tokyoOffsetDate(currentYear - 1, startMonth, startDay, 0);
+          const inclusiveRangeEnd = tokyoOffsetDate(currentYear, endMonth, endDay, 0);
+          rangeEnd = new Date(inclusiveRangeEnd.getTime() + 24 * 60 * 60 * 1000);
+          
+          // If end is in the past, move entire range to next year
+          if (inclusiveRangeEnd < nowDateOnly) {
+            rangeStart = tokyoOffsetDate(currentYear, startMonth, startDay, 0);
+            const newEnd = tokyoOffsetDate(currentYear + 1, endMonth, endDay, 0);
+            rangeEnd = new Date(newEnd.getTime() + 24 * 60 * 60 * 1000);
+          }
+        } else {
+          // Edge case
+          rangeStart = tokyoOffsetDate(currentYear, startMonth, startDay, 0);
+          const inclusiveRangeEnd = tokyoOffsetDate(currentYear + 1, endMonth, endDay, 0);
+          rangeEnd = new Date(inclusiveRangeEnd.getTime() + 24 * 60 * 60 * 1000);
+        }
       } else {
+        // Same-year range or explicit year specified
+        rangeStart = tokyoOffsetDate(startYear, startMonth, startDay, 0);
+        let inclusiveRangeEnd = tokyoOffsetDate(endYear, endMonth, endDay, 0);
+
+        // Handle year wrapping if needed
+        if (!japaneseRangeMatch[5] && inclusiveRangeEnd < rangeStart) {
+          inclusiveRangeEnd = tokyoOffsetDate(endYear + 1, endMonth, endDay, 0);
+        }
+        
         rangeEnd = new Date(inclusiveRangeEnd.getTime() + 24 * 60 * 60 * 1000);
+
+        // If no explicit year and end date is in the past, move entire range to next year
+        if (!japaneseRangeMatch[1] && inclusiveRangeEnd < nowDateOnly) {
+          rangeStart = tokyoOffsetDate(currentYear + 1, startMonth, startDay, 0);
+          if (endMonth < startMonth || (endMonth === startMonth && endDay < startDay)) {
+            inclusiveRangeEnd = tokyoOffsetDate(currentYear + 2, endMonth, endDay, 0);
+          } else {
+            inclusiveRangeEnd = tokyoOffsetDate(currentYear + 1, endMonth, endDay, 0);
+          }
+          rangeEnd = new Date(inclusiveRangeEnd.getTime() + 24 * 60 * 60 * 1000);
+        }
       }
 
       const startParts = tokyoDateParts(rangeStart);
@@ -295,19 +339,57 @@ export function parseCondition(condition: string, now: Date) {
       endMonth < 1 || endMonth > 12 || endDay < 1 || endDay > 31;
 
     if (!invalidDateRange) {
-      rangeStart = tokyoOffsetDate(currentYear, startMonth, startDay, 0);
-      let inclusiveRangeEnd = tokyoOffsetDate(currentYear, endMonth, endDay, 0);
-
-      // Compare by date, not timestamp, to allow ranges starting today
       const nowDateOnly = tokyoOffsetDate(currentYear, currentMonth, currentDay, 0);
-      if (rangeStart < nowDateOnly) {
-        rangeStart = tokyoOffsetDate(currentYear + 1, startMonth, startDay, 0);
-        inclusiveRangeEnd = tokyoOffsetDate(currentYear + 1, endMonth, endDay, 0);
+      const isYearWrapping = endMonth < startMonth || (endMonth === startMonth && endDay < startDay);
+      
+      if (isYearWrapping) {
+        // Year-wrapping range (e.g., 12/28-1/5)
+        // Determine which year the range belongs to based on current month
+        if (currentMonth >= startMonth) {
+          // We're in the start month or later (e.g., now is 12/30, range is 12/28-1/5)
+          // Start is this year, end is next year
+          rangeStart = tokyoOffsetDate(currentYear, startMonth, startDay, 0);
+          const inclusiveRangeEnd = tokyoOffsetDate(currentYear + 1, endMonth, endDay, 0);
+          rangeEnd = new Date(inclusiveRangeEnd.getTime() + 24 * 60 * 60 * 1000);
+          
+          // If end is in the past, move entire range to next year
+          if (inclusiveRangeEnd < nowDateOnly) {
+            rangeStart = tokyoOffsetDate(currentYear + 1, startMonth, startDay, 0);
+            const newEnd = tokyoOffsetDate(currentYear + 2, endMonth, endDay, 0);
+            rangeEnd = new Date(newEnd.getTime() + 24 * 60 * 60 * 1000);
+          }
+        } else if (currentMonth <= endMonth) {
+          // We're in the end month or earlier (e.g., now is 1/3, range is 12/28-1/5)
+          // Start is last year, end is this year
+          rangeStart = tokyoOffsetDate(currentYear - 1, startMonth, startDay, 0);
+          const inclusiveRangeEnd = tokyoOffsetDate(currentYear, endMonth, endDay, 0);
+          rangeEnd = new Date(inclusiveRangeEnd.getTime() + 24 * 60 * 60 * 1000);
+          
+          // If end is in the past, move entire range to next year
+          if (inclusiveRangeEnd < nowDateOnly) {
+            rangeStart = tokyoOffsetDate(currentYear, startMonth, startDay, 0);
+            const newEnd = tokyoOffsetDate(currentYear + 1, endMonth, endDay, 0);
+            rangeEnd = new Date(newEnd.getTime() + 24 * 60 * 60 * 1000);
+          }
+        } else {
+          // Edge case: current month is between start and end (shouldn't happen for year-wrapping)
+          rangeStart = tokyoOffsetDate(currentYear, startMonth, startDay, 0);
+          const inclusiveRangeEnd = tokyoOffsetDate(currentYear + 1, endMonth, endDay, 0);
+          rangeEnd = new Date(inclusiveRangeEnd.getTime() + 24 * 60 * 60 * 1000);
+        }
+      } else {
+        // Same-year range
+        rangeStart = tokyoOffsetDate(currentYear, startMonth, startDay, 0);
+        let inclusiveRangeEnd = tokyoOffsetDate(currentYear, endMonth, endDay, 0);
+        rangeEnd = new Date(inclusiveRangeEnd.getTime() + 24 * 60 * 60 * 1000);
+        
+        // If end date is in the past, move entire range to next year
+        if (inclusiveRangeEnd < nowDateOnly) {
+          rangeStart = tokyoOffsetDate(currentYear + 1, startMonth, startDay, 0);
+          inclusiveRangeEnd = tokyoOffsetDate(currentYear + 1, endMonth, endDay, 0);
+          rangeEnd = new Date(inclusiveRangeEnd.getTime() + 24 * 60 * 60 * 1000);
+        }
       }
-      if (inclusiveRangeEnd < rangeStart) {
-        inclusiveRangeEnd = tokyoOffsetDate(Number(tokyoDateParts(rangeStart).year) + 1, endMonth, endDay, 0);
-      }
-      rangeEnd = new Date(inclusiveRangeEnd.getTime() + 24 * 60 * 60 * 1000);
 
       const startParts = tokyoDateParts(rangeStart);
       const endParts = tokyoDateParts(new Date(rangeEnd.getTime() - 1));
