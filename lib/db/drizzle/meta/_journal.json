@@ -71,6 +71,13 @@
       "when": 1788770977518,
       "tag": "0009_lyrical_meteorite",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1792733724984,
+      "tag": "0010_lively_harrier",
+      "breakpoints": true
     }
   ]
 }

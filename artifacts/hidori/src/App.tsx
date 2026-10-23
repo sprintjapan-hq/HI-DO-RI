@@ -15,11 +15,13 @@ import Privacy from '@/pages/privacy';
 import Terms from '@/pages/terms';
 import AdminDevelopment from '@/pages/admin-development';
 import ClaimLegacyPoll from '@/pages/claim-legacy-poll';
+import AdminAnalytics from '@/pages/admin-analytics';
 import { ThemeProvider } from '@/lib/theme';
 import { ClerkProvider, Show, SignIn, SignUp } from '@clerk/react';
 import { publishableKeyFromHost } from '@clerk/react/internal';
 import { shadcn } from '@clerk/themes';
 import { Redirect, useLocation } from 'wouter';
+import { initAnalytics } from '@/lib/analytics';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -151,6 +153,15 @@ function AdminDevelopmentRoute() {
   );
 }
 
+function AdminAnalyticsRoute() {
+  return (
+    <>
+      <Show when="signed-in"><AdminAnalytics /></Show>
+      <Show when="signed-out"><Redirect to="/" /></Show>
+    </>
+  );
+}
+
 function ClaimLegacyPollRoute() {
   return (
     <>
@@ -173,6 +184,7 @@ function Router() {
       <Route path="/privacy" component={Privacy} />
       <Route path="/terms" component={Terms} />
       <Route path="/admin/development" component={AdminDevelopmentRoute} />
+      <Route path="/admin/analytics" component={AdminAnalyticsRoute} />
       <Route path="/claim-legacy-poll" component={ClaimLegacyPollRoute} />
       <Route path="/p/:shareId/edit" component={EditPollRoute} />
       <Route path="/p/:shareId" component={PollView} />
@@ -204,6 +216,8 @@ function ClerkProviderWithRoutes() {
 }
 
 function App() {
+  initAnalytics();
+  
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>

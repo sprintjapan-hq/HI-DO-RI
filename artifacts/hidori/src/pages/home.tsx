@@ -3,8 +3,13 @@ import { ArrowRight, LockKeyhole, ShieldCheck } from "lucide-react";
 import { Layout } from "@/components/layout";
 import { HomeScreenshots } from "@/components/home-screenshots";
 import { Button } from "@/components/ui/button";
+import { trackEvent } from "@/lib/analytics";
 
 export default function Home() {
+  const handleLoginClick = () => {
+    trackEvent("login_start");
+  };
+
   return (
     <Layout>
       <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col">
@@ -29,11 +34,11 @@ export default function Home() {
               <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
                 イベント作成と管理には、主催者アカウントでのログインが必要です。
               </p>
-              <Button asChild className="mt-6 w-full font-bold">
+              <Button asChild className="mt-6 w-full font-bold" onClick={handleLoginClick}>
                 <Link href="/sign-in">ログインして作成する <ArrowRight className="ml-2 h-4 w-4" /></Link>
               </Button>
               <p className="mt-4 text-center text-xs text-muted-foreground">
-                初めての方は <Link href="/sign-up" className="font-medium text-primary hover:underline">アカウントを作成</Link>
+                初めての方は <Link href="/sign-up" className="font-medium text-primary hover:underline" onClick={handleLoginClick}>アカウントを作成</Link>
               </p>
             </div>
             <div className="rounded-xl border border-border/60 bg-muted/20 p-6">

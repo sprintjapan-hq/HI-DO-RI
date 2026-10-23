@@ -21,3 +21,4 @@ export * from "./polls";
 export * from "./feature-requests";
 export * from "./calendar-connections";
 export * from "./poll-calendar-events";
+export * from "./analytics-events";
