@@ -137,7 +137,7 @@ export default function Privacy() {
 
         <section className="space-y-4">
           <h2 className="font-serif text-2xl font-bold text-foreground">8. 開示等のご請求・お問い合わせ</h2>
-          <p>保有する個人情報の開示、訂正、利用停止、削除等のご請求、および本ポリシーに関するお問い合わせは、次の窓口で受け付けます。</p>
+          <p>保有する個人情報の開示、訂正、利用停止、削除等のご請求、および本ポリシーに関するお問い合わせは、次の窓口で受け付けます。アクセス計測については第9条をご覧ください。</p>
           <div>
             <p>
               窓口：お問い合わせフォーム（
@@ -159,7 +159,27 @@ export default function Privacy() {
 
         <section className="space-y-4">
           <h2 className="font-serif text-2xl font-bold text-foreground">9. アクセス解析について</h2>
-          <p>本サービスでは、アクセス解析ツールは使用していません。</p>
+          <p>本サービスでは、利用状況を把握して改善するために、自社で作った簡易なアクセス計測を使っています。</p>
+          <div className="space-y-3">
+            <p>
+              <strong>・記録する情報：</strong>その訪問で最初に開いたページ、作成のためのログインボタンを押したこと、作成フォームへの入力の開始と送信、そのときのページのパス、流入元を示すURLパラメータ（utm_source・utm_campaign・utm_content）、記録した日時
+            </p>
+            <p>
+              <strong>・記録しない情報：</strong>IPアドレス、お名前、メールアドレス、ログインID、○△×の回答、入力した中身、参照元、端末やブラウザの種類。イベントのURLに含まれるIDは、記録する前に伏せます。
+            </p>
+            <p>
+              <strong>・Cookie：</strong>計測にCookieは使いません。同じ訪問を二重に数えないための目印だけを、ブラウザの一時的な保存（sessionStorage）に置きます。タブを閉じると消えます。
+            </p>
+            <p>
+              <strong>・外部への送信：</strong>計測データは本サービスのサーバー内にだけ保存し、外部の解析サービスや第三者には送りません。
+            </p>
+            <p>
+              <strong>・保存期間：</strong>12か月を過ぎた記録は、自動で消します。
+            </p>
+            <p>
+              <strong>・止め方：</strong>ブラウザでトラッキング拒否（Do Not Track または Global Privacy Control）を設定している場合は、計測しません。
+            </p>
+          </div>
         </section>
 
         <section className="space-y-4">
@@ -169,6 +189,7 @@ export default function Privacy() {
 
         <footer className="space-y-1 border-t border-border/60 pt-8">
           <p>制定日：2026年9月10日</p>
+          <p>最終更新日：2026年10月23日</p>
           <p>スプリントジャパン株式会社</p>
         </footer>
       </article>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { useUser } from "@clerk/react";
 import { useForm } from "react-hook-form";
@@ -16,6 +16,7 @@ import { saveEvent } from "@/lib/events";
 import { needsGoogleCalendarReconnect } from "@/lib/google-calendar-error";
 import { toast } from "sonner";
 import { CalendarConnection } from "@/components/calendar-connection";
+import { trackEvent } from "@/lib/analytics";
 
 const formSchema = z.object({
   title: z.string().trim().min(1, "イベント名を入力してください").max(120, "120文字以内で入力してください"),
@@ -37,6 +38,12 @@ export default function CreatePoll() {
   
   const [generatorCondition, setGeneratorCondition] = useState("");
   const [generatedSlots, setGeneratedSlots] = useState<CalendarCandidateSlot[]>([]);
+  const [titleFocused, setTitleFocused] = useState(false);
+
+  useEffect(() => {
+    if (!titleFocused) return;
+    trackEvent("form_start");
+  }, [titleFocused]);
 
   const { register, handleSubmit, formState: { errors }, getValues, setValue } = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -44,6 +51,8 @@ export default function CreatePoll() {
   });
 
   const onSubmit = (data: FormValues) => {
+    trackEvent("form_submit");
+    
     if (!user) {
       toast.error("イベント作成にはログインが必要です。");
       setLocation("/sign-in");
@@ -98,7 +107,13 @@ export default function CreatePoll() {
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-7 p-6 sm:p-8">
             <div className="space-y-2">
               <Label htmlFor="title">イベント名</Label>
-              <Input id="title" placeholder="例: 経営者向けAI勉強会 B-5" className="bg-background/60 text-base" {...register("title")} />
+              <Input 
+                id="title" 
+                placeholder="例: 経営者向けAI勉強会 B-5" 
+                className="bg-background/60 text-base" 
+                {...register("title")} 
+                onFocus={() => setTitleFocused(true)}
+              />
               {errors.title && <p className="text-sm text-destructive">{errors.title.message}</p>}
             </div>
 
