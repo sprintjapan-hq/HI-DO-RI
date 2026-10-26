@@ -1,7 +1,7 @@
 import { Router, type IRouter, type Response } from "express";
 import { getAuth } from "@clerk/express";
 import { db, analyticsEventsTable } from "@workspace/db";
-import { sql, and, ne, isNotNull } from "drizzle-orm";
+import { sql, and, ne, isNotNull, or, isNull } from "drizzle-orm";
 
 const router: IRouter = Router();
 
@@ -45,7 +45,10 @@ router.get("/analytics/stats", async (req, res): Promise<void> => {
     const excludeVerify = req.query.excludeVerify !== "false";
     
     const whereClause = excludeVerify
-      ? ne(analyticsEventsTable.utmCampaign, "hd-verify")
+      ? or(
+          isNull(analyticsEventsTable.utmCampaign),
+          ne(analyticsEventsTable.utmCampaign, "hd-verify")
+        )
       : undefined;
 
     const eventCounts = await db

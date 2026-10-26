@@ -14,7 +14,7 @@ let dailyResetTime = Date.now() + 24 * 60 * 60 * 1000;
 const BOT_USER_AGENTS = [
   "bot", "crawler", "spider", "scraper", "slurp", "googlebot", "bingbot",
   "yandex", "baiduspider", "duckduckbot", "facebookexternalhit", "twitterbot",
-  "whatsapp", "telegram", "linkedinbot", "slack", "discord",
+  "whatsapp", "telegrambot", "linkedinbot", "slackbot", "discordbot",
 ];
 
 function isBot(userAgent: string | undefined): boolean {
