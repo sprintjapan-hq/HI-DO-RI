@@ -5,6 +5,7 @@ import { LogOut, Moon, Plus, Sun, UserRound } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTheme } from "@/lib/theme";
 import { DragonMark } from "@/components/dragon-mark";
+import { trackEvent } from "@/lib/analytics";
 
 export function Layout({ children }: { children: ReactNode }) {
   const { theme, toggleTheme } = useTheme();
@@ -55,7 +56,7 @@ export function Layout({ children }: { children: ReactNode }) {
                 </button>
               </>
             ) : (
-              <Link href="/sign-in" className="hidden text-xs font-medium text-muted-foreground hover:text-primary sm:inline">
+              <Link href="/sign-in" className="hidden text-xs font-medium text-muted-foreground hover:text-primary sm:inline" onClick={() => trackEvent("login_start")}>
                 主催者ログイン
               </Link>
             )}
