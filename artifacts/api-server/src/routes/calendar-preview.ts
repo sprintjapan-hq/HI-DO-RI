@@ -153,7 +153,11 @@ router.post(["/calendar/candidates", "/calendar-preview/candidates"], async (req
     res.status(502).json({ error: "Googleカレンダーの接続情報を確認できませんでした。時間をおいて再度お試しください。" });
     return;
   }
-  if (access.status === "disconnected" || access.status === "needs_reconnect") {
+  if (access.status === "needs_reconnect") {
+    sendReconnectRequired(res);
+    return;
+  }
+  if (access.status === "disconnected") {
     res.status(409).json({ error: "Googleカレンダーを接続してください。" });
     return;
   }
