@@ -113,7 +113,8 @@ router.post("/calendar/connection", async (req, res): Promise<void> => {
     },
   });
   
-  syncOpenOwnerPollsTentativeEvents(userId).catch((error) => {
+  const baseUrl = `${req.protocol}://${req.get("host")}`;
+  syncOpenOwnerPollsTentativeEvents(userId, baseUrl).catch((error) => {
     req.log.error({ err: error, userId }, "Failed to sync open polls on calendar connection");
   });
   

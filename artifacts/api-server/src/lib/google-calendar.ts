@@ -8,7 +8,7 @@ import {
   pollCandidatesTable,
   pollsTable,
 } from "@workspace/db";
-import { and, eq, inArray, isNull, lte, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { logger } from "./logger";
 
 export const GOOGLE_CALENDAR_TIME_ZONE = "Asia/Tokyo";
@@ -293,30 +293,107 @@ export async function createTentativePollEvents(input: {
       item.candidateId === null ? [] : [item.candidateId],
     ),
   );
-  await Promise.all(
-    candidates.map(async (candidate) => {
-      if (
-        existingCandidateIds.has(candidate.id) ||
-        !candidate.startAt ||
-        !candidate.endAt ||
-        candidate.endAt <= candidate.startAt
-      ) {
-        return;
+  
+  const candidatesWithTime = candidates.filter(
+    (c) =>
+      !existingCandidateIds.has(c.id) &&
+      c.startAt &&
+      c.endAt &&
+      c.endAt > c.startAt,
+  );
+  
+  if (candidatesWithTime.length === 0) return;
+  
+  let existingGoogleEvents: Map<number, { id: string; htmlLink: string | null }> = new Map();
+  
+  try {
+    const allStartTimes = candidatesWithTime.map(c => c.startAt!.getTime());
+    const allEndTimes = candidatesWithTime.map(c => c.endAt!.getTime());
+    const timeMin = new Date(Math.min(...allStartTimes));
+    const timeMax = new Date(Math.max(...allEndTimes));
+    
+    const response = await googleRequest(
+      access.token,
+      `/calendar/v3/calendars/primary/events?timeMin=${encodeURIComponent(timeMin.toISOString())}&timeMax=${encodeURIComponent(timeMax.toISOString())}&singleEvents=true`,
+      { method: "GET" },
+    );
+    
+    if (response.ok) {
+      const data = (await response.json()) as {
+        items?: Array<{
+          id?: string;
+          htmlLink?: string;
+          summary?: string;
+          description?: string;
+          start?: { dateTime?: string };
+          end?: { dateTime?: string };
+          extendedProperties?: { private?: Record<string, string> };
+        }>;
+      };
+      
+      const expectedSummary = `[仮] ${poll.title}`;
+      
+      for (const item of data.items ?? []) {
+        if (!item.id || !item.start?.dateTime || !item.end?.dateTime) continue;
+        
+        const matchesSummary = item.summary === expectedSummary;
+        const matchesShareId = item.extendedProperties?.private?.hidoriShareId === poll.shareId;
+        
+        if (!matchesSummary && !matchesShareId) continue;
+        
+        const eventStart = new Date(item.start.dateTime).getTime();
+        const eventEnd = new Date(item.end.dateTime).getTime();
+        
+        const matchingCandidate = candidatesWithTime.find(
+          (c) =>
+            c.startAt!.getTime() === eventStart &&
+            c.endAt!.getTime() === eventEnd,
+        );
+        
+        if (matchingCandidate) {
+          existingGoogleEvents.set(matchingCandidate.id, {
+            id: item.id,
+            htmlLink: item.htmlLink ?? null,
+          });
+        }
       }
+    }
+  } catch (error) {
+    logger.warn(
+      { err: error, pollId: poll.id },
+      "Failed to query existing Google Calendar events, will proceed with creation",
+    );
+  }
+  
+  await Promise.all(
+    candidatesWithTime.map(async (candidate) => {
       try {
-        const event = await createGoogleEvent(access.token, {
-          eventId: googleEventId(poll.id, candidate.id, "tentative"),
-          summary: `[仮] ${poll.title}`,
-          description: `HI-DO-RIで日程調整中の候補です。\n${input.shareUrl}`,
-          startAt: candidate.startAt,
-          endAt: candidate.endAt,
-          privateProperties: {
-            hidoriShareId: poll.shareId,
-            hidoriPollId: String(poll.id),
-            hidoriCandidateId: String(candidate.id),
-            hidoriKind: "tentative",
-          },
-        });
+        const existingEvent = existingGoogleEvents.get(candidate.id);
+        
+        let event: GoogleEventResult;
+        
+        if (existingEvent) {
+          event = existingEvent;
+          logger.info(
+            { pollId: poll.id, candidateId: candidate.id, googleEventId: existingEvent.id },
+            "Adopted existing Google Calendar tentative event",
+          );
+        } else {
+          event = await createGoogleEvent(access.token, {
+            eventId: googleEventId(poll.id, candidate.id, "tentative"),
+            summary: `[仮] ${poll.title}`,
+            description: `HI-DO-RIで日程調整中の候補です。\n${input.shareUrl}`,
+            startAt: candidate.startAt!,
+            endAt: candidate.endAt!,
+            privateProperties: {
+              hidoriShareId: poll.shareId,
+              hidoriPollId: String(poll.id),
+              hidoriCandidateId: String(candidate.id),
+              hidoriKind: "tentative",
+            },
+          });
+        }
+        
         await db
           .insert(pollCalendarEventsTable)
           .values({
@@ -729,6 +806,7 @@ export async function retryDueCalendarSyncs(now = new Date()): Promise<void> {
 
 export async function syncOpenOwnerPollsTentativeEvents(
   ownerUserId: string,
+  baseUrl = "https://hi-do-ri.replit.app",
 ): Promise<void> {
   if (
     process.env.NODE_ENV === "test" &&
@@ -738,6 +816,7 @@ export async function syncOpenOwnerPollsTentativeEvents(
     return;
   }
   try {
+    const now = new Date();
     const openPolls = await db
       .select({
         id: pollsTable.id,
@@ -749,6 +828,7 @@ export async function syncOpenOwnerPollsTentativeEvents(
         and(
           eq(pollsTable.ownerUserId, ownerUserId),
           isNull(pollsTable.confirmedCandidateId),
+          or(isNull(pollsTable.deadline), gt(pollsTable.deadline, now)),
         ),
       );
     
@@ -779,7 +859,7 @@ export async function syncOpenOwnerPollsTentativeEvents(
       await createTentativePollEvents({
         pollId: poll.id,
         ownerUserId,
-        shareUrl: `https://hidori.jp/p/${poll.shareId}`,
+        shareUrl: `${baseUrl}/p/${encodeURIComponent(poll.shareId)}`,
       });
     }
   } catch (error) {
