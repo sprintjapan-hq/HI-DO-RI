@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 
 const CALENDAR_SCOPES = [
   "https://www.googleapis.com/auth/calendar.freebusy",
+  "https://www.googleapis.com/auth/calendar.events",
 ];
 const OAUTH_INTENT_KEY = "hidori_google_calendar_oauth_intent";
 

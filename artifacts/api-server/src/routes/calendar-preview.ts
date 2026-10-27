@@ -15,6 +15,7 @@ import {
   GOOGLE_CALENDAR_RECONNECT_ERROR_CODE,
   GOOGLE_CALENDAR_TIME_ZONE,
   synchronizePollCalendarEvents,
+  syncOpenOwnerPollsTentativeEvents,
 } from "../lib/google-calendar";
 import { parseCondition, generateCandidateSlots, selectFreeSlots } from "./condition-parser";
 
@@ -23,6 +24,7 @@ const TIME_ZONE = GOOGLE_CALENDAR_TIME_ZONE;
 const GOOGLE_PROVIDER = "oauth_google";
 const REQUIRED_SCOPES = [
   "https://www.googleapis.com/auth/calendar.freebusy",
+  "https://www.googleapis.com/auth/calendar.events",
 ];
 const RECONNECT_MESSAGE =
   "Googleカレンダーの権限が切れています。Googleカレンダーを再接続してください。";
@@ -110,6 +112,11 @@ router.post("/calendar/connection", async (req, res): Promise<void> => {
       updatedAt: new Date(),
     },
   });
+  
+  syncOpenOwnerPollsTentativeEvents(userId).catch((error) => {
+    req.log.error({ err: error, userId }, "Failed to sync open polls on calendar connection");
+  });
+  
   res.json(GetCalendarConnectionResponse.parse({
     connected: true,
     email: account?.emailAddress ?? null,
@@ -145,7 +152,7 @@ router.post(["/calendar/candidates", "/calendar-preview/candidates"], async (req
     res.status(502).json({ error: "Googleカレンダーの接続情報を確認できませんでした。時間をおいて再度お試しください。" });
     return;
   }
-  if (access.status === "disconnected") {
+  if (access.status === "disconnected" || access.status === "needs_reconnect") {
     res.status(409).json({ error: "Googleカレンダーを接続してください。" });
     return;
   }
