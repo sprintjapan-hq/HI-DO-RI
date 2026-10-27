@@ -1,6 +1,56 @@
 <!DOCTYPE html>
 <html lang="ja">
   <head>
+    <script>
+      // Block Replit's injected i.replit.com/script.js from sending any data
+      (function() {
+        // 1. Disable Umami via localStorage
+        try {
+          localStorage.setItem("umami.disabled", "1");
+        } catch {}
+        
+        // 2. Intercept fetch and sendBeacon to block i.replit.com requests
+        const originalFetch = window.fetch;
+        window.fetch = function() {
+          const url = arguments[0];
+          const urlStr = typeof url === "string" ? url : (url && url.url) || "";
+          if (urlStr.includes("i.replit.com")) {
+            return Promise.resolve(new Response(null, { status: 204 }));
+          }
+          return originalFetch.apply(this, arguments);
+        };
+        
+        const originalSendBeacon = navigator.sendBeacon;
+        if (originalSendBeacon) {
+          navigator.sendBeacon = function(url) {
+            if (typeof url === "string" && url.includes("i.replit.com")) {
+              return true;
+            }
+            return originalSendBeacon.apply(this, arguments);
+          };
+        }
+        
+        // 3. MutationObserver to strip data-website-id and src from Replit script
+        const observer = new MutationObserver(function(mutations) {
+          mutations.forEach(function(mutation) {
+            mutation.addedNodes.forEach(function(node) {
+              if (node.nodeName === "SCRIPT") {
+                const src = node.getAttribute("src") || "";
+                if (src.includes("i.replit.com/script.js")) {
+                  node.removeAttribute("data-website-id");
+                  node.removeAttribute("src");
+                }
+              }
+            });
+          });
+        });
+        
+        observer.observe(document.documentElement, {
+          childList: true,
+          subtree: true
+        });
+      })();
+    </script>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
     <title>イベント日程調整アプリ HI-DO-RI</title>

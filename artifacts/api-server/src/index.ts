@@ -2,6 +2,7 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { startFeatureRequestNotificationWorker } from "./lib/feature-request-notifications";
 import { startCalendarSyncWorker } from "./lib/google-calendar";
+import { startAnalyticsCleanupWorker } from "./lib/analytics-cleanup";
 
 const rawPort = process.env["PORT"];
 
@@ -26,4 +27,5 @@ app.listen(port, (err) => {
   logger.info({ port }, "Server listening");
   startFeatureRequestNotificationWorker();
   startCalendarSyncWorker();
+  startAnalyticsCleanupWorker();
 });
