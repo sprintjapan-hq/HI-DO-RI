@@ -547,7 +547,7 @@ test("Google同期は日時のある候補だけを同数登録する", async ()
   assert.ok(createdIds.every((id) => googleCreateAttempts.get(id) === 1));
 });
 
-test("calendar.events権限がなくても出欠表の作成と確定に成功する", async () => {
+test("calendar.events権限がない場合でも出欠表の作成は成功し確定時に再接続が促される", async () => {
   const ownerUserId = `calendar-sync-test-freebusy-only-${randomUUID()}`;
   const poll = await createPoll({
     candidates: ["候補A", "候補B"],
@@ -566,9 +566,14 @@ test("calendar.events権限がなくても出欠表の作成と確定に成功�
     body: JSON.stringify({ candidateId: poll.candidates[0].id }),
   });
 
-  assert.equal(confirmation.response.status, 200);
-  assert.equal(confirmation.body.confirmedCandidateId, poll.candidates[0].id);
-  assert.equal(confirmation.body.code, undefined);
+  assert.equal(confirmation.response.status, 409);
+  assert.equal(confirmation.body.code, "google_calendar_reconnect_required");
+  assert.ok(confirmation.body.error.includes("再接続"));
+  
+  const updatedPoll = await request(`/api/polls/${poll.shareId}`, {
+    headers: { "X-Test-User-Id": ownerUserId },
+  });
+  assert.equal(updatedPoll.body.confirmedCandidateId, poll.candidates[0].id);
   assert.equal(calendarRows(poll.shareId).length, 0);
 });
 

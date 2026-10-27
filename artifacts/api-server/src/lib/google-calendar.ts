@@ -8,18 +8,21 @@ import {
   pollCandidatesTable,
   pollsTable,
 } from "@workspace/db";
-import { and, eq, inArray, lte, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { logger } from "./logger";
 
 export const GOOGLE_CALENDAR_TIME_ZONE = "Asia/Tokyo";
 export const GOOGLE_CALENDAR_RECONNECT_ERROR_CODE =
   "google_calendar_reconnect_required";
 const GOOGLE_PROVIDER = "oauth_google";
-const REQUIRED_SCOPES = [
-  "https://www.googleapis.com/auth/calendar.freebusy",
-];
-const CALENDAR_EVENTS_SCOPE =
+export const CALENDAR_FREEBUSY_SCOPE =
+  "https://www.googleapis.com/auth/calendar.freebusy";
+export const CALENDAR_EVENTS_SCOPE =
   "https://www.googleapis.com/auth/calendar.events";
+const REQUIRED_SCOPES = [
+  CALENDAR_FREEBUSY_SCOPE,
+  CALENDAR_EVENTS_SCOPE,
+];
 const RETRY_INTERVAL_MS =
   process.env.NODE_ENV === "test" ? 100 : 60_000;
 const MAX_RETRY_DELAY_MS = 60 * 60 * 1000;
@@ -93,6 +96,18 @@ export async function getGoogleAccess(userId: string) {
     process.env.GOOGLE_CALENDAR_TEST_TOKEN &&
     userId.startsWith("calendar-sync-test-")
   ) {
+    const scopes = userId.includes("freebusy-only")
+      ? [CALENDAR_FREEBUSY_SCOPE]
+      : [...REQUIRED_SCOPES, CALENDAR_EVENTS_SCOPE];
+    
+    const hasAllRequiredScopes = REQUIRED_SCOPES.every((scope) =>
+      scopes.includes(scope),
+    );
+    
+    if (!hasAllRequiredScopes) {
+      return { status: "needs_reconnect" as const };
+    }
+    
     return {
       status: "connected" as const,
       connection: {
@@ -103,9 +118,7 @@ export async function getGoogleAccess(userId: string) {
         updatedAt: new Date(),
       },
       token: process.env.GOOGLE_CALENDAR_TEST_TOKEN,
-      scopes: userId.includes("freebusy-only")
-        ? ["https://www.googleapis.com/auth/calendar.freebusy"]
-        : [...REQUIRED_SCOPES, CALENDAR_EVENTS_SCOPE],
+      scopes,
     };
   }
   try {
@@ -122,9 +135,10 @@ export async function getGoogleAccess(userId: string) {
     );
     if (
       !token ||
+      !token.token ||
       !REQUIRED_SCOPES.every((scope) => token.scopes?.includes(scope))
     ) {
-      return { status: "disconnected" as const };
+      return { status: "needs_reconnect" as const };
     }
     return {
       status: "connected" as const,
@@ -253,7 +267,6 @@ export async function createTentativePollEvents(input: {
   }
   const access = await getGoogleAccess(input.ownerUserId);
   if (access.status !== "connected") return;
-  if (!access.scopes.includes(CALENDAR_EVENTS_SCOPE)) return;
 
   const [poll, candidates, existing] = await Promise.all([
     db.query.pollsTable.findFirst({
@@ -280,30 +293,107 @@ export async function createTentativePollEvents(input: {
       item.candidateId === null ? [] : [item.candidateId],
     ),
   );
-  await Promise.all(
-    candidates.map(async (candidate) => {
-      if (
-        existingCandidateIds.has(candidate.id) ||
-        !candidate.startAt ||
-        !candidate.endAt ||
-        candidate.endAt <= candidate.startAt
-      ) {
-        return;
+  
+  const candidatesWithTime = candidates.filter(
+    (c) =>
+      !existingCandidateIds.has(c.id) &&
+      c.startAt &&
+      c.endAt &&
+      c.endAt > c.startAt,
+  );
+  
+  if (candidatesWithTime.length === 0) return;
+  
+  let existingGoogleEvents: Map<number, { id: string; htmlLink: string | null }> = new Map();
+  
+  try {
+    const allStartTimes = candidatesWithTime.map(c => c.startAt!.getTime());
+    const allEndTimes = candidatesWithTime.map(c => c.endAt!.getTime());
+    const timeMin = new Date(Math.min(...allStartTimes));
+    const timeMax = new Date(Math.max(...allEndTimes));
+    
+    const response = await googleRequest(
+      access.token,
+      `/calendar/v3/calendars/primary/events?timeMin=${encodeURIComponent(timeMin.toISOString())}&timeMax=${encodeURIComponent(timeMax.toISOString())}&singleEvents=true`,
+      { method: "GET" },
+    );
+    
+    if (response.ok) {
+      const data = (await response.json()) as {
+        items?: Array<{
+          id?: string;
+          htmlLink?: string;
+          summary?: string;
+          description?: string;
+          start?: { dateTime?: string };
+          end?: { dateTime?: string };
+          extendedProperties?: { private?: Record<string, string> };
+        }>;
+      };
+      
+      const expectedSummary = `[仮] ${poll.title}`;
+      
+      for (const item of data.items ?? []) {
+        if (!item.id || !item.start?.dateTime || !item.end?.dateTime) continue;
+        
+        const matchesSummary = item.summary === expectedSummary;
+        const matchesShareId = item.extendedProperties?.private?.hidoriShareId === poll.shareId;
+        
+        if (!matchesSummary && !matchesShareId) continue;
+        
+        const eventStart = new Date(item.start.dateTime).getTime();
+        const eventEnd = new Date(item.end.dateTime).getTime();
+        
+        const matchingCandidate = candidatesWithTime.find(
+          (c) =>
+            c.startAt!.getTime() === eventStart &&
+            c.endAt!.getTime() === eventEnd,
+        );
+        
+        if (matchingCandidate) {
+          existingGoogleEvents.set(matchingCandidate.id, {
+            id: item.id,
+            htmlLink: item.htmlLink ?? null,
+          });
+        }
       }
+    }
+  } catch (error) {
+    logger.warn(
+      { err: error, pollId: poll.id },
+      "Failed to query existing Google Calendar events, will proceed with creation",
+    );
+  }
+  
+  await Promise.all(
+    candidatesWithTime.map(async (candidate) => {
       try {
-        const event = await createGoogleEvent(access.token, {
-          eventId: googleEventId(poll.id, candidate.id, "tentative"),
-          summary: `[仮] ${poll.title}`,
-          description: `HI-DO-RIで日程調整中の候補です。\n${input.shareUrl}`,
-          startAt: candidate.startAt,
-          endAt: candidate.endAt,
-          privateProperties: {
-            hidoriShareId: poll.shareId,
-            hidoriPollId: String(poll.id),
-            hidoriCandidateId: String(candidate.id),
-            hidoriKind: "tentative",
-          },
-        });
+        const existingEvent = existingGoogleEvents.get(candidate.id);
+        
+        let event: GoogleEventResult;
+        
+        if (existingEvent) {
+          event = existingEvent;
+          logger.info(
+            { pollId: poll.id, candidateId: candidate.id, googleEventId: existingEvent.id },
+            "Adopted existing Google Calendar tentative event",
+          );
+        } else {
+          event = await createGoogleEvent(access.token, {
+            eventId: googleEventId(poll.id, candidate.id, "tentative"),
+            summary: `[仮] ${poll.title}`,
+            description: `HI-DO-RIで日程調整中の候補です。\n${input.shareUrl}`,
+            startAt: candidate.startAt!,
+            endAt: candidate.endAt!,
+            privateProperties: {
+              hidoriShareId: poll.shareId,
+              hidoriPollId: String(poll.id),
+              hidoriCandidateId: String(candidate.id),
+              hidoriKind: "tentative",
+            },
+          });
+        }
+        
         await db
           .insert(pollCalendarEventsTable)
           .values({
@@ -337,16 +427,10 @@ export async function finalizePollCalendarEvents(input: {
     return null;
   }
   const access = await getGoogleAccess(input.ownerUserId);
-  if (
-    access.status === "connected" &&
-    !access.scopes.includes(CALENDAR_EVENTS_SCOPE)
-  ) {
-    return null;
-  }
   if (access.status === "unavailable") {
     throw new CalendarSyncError("Google Calendar connection is temporarily unavailable", true);
   }
-  if (access.status === "disconnected") {
+  if (access.status === "needs_reconnect" || access.status === "disconnected") {
     throw new CalendarSyncError(
       "Google Calendar needs to be reconnected",
       false,
@@ -718,6 +802,72 @@ export async function retryDueCalendarSyncs(now = new Date()): Promise<void> {
     )
     .limit(SYNC_BATCH_SIZE);
   await Promise.all(due.map(({ pollId }) => processCalendarSync(pollId, now)));
+}
+
+export async function syncOpenOwnerPollsTentativeEvents(
+  ownerUserId: string,
+  baseUrl = "https://hi-do-ri.replit.app",
+): Promise<void> {
+  if (
+    process.env.NODE_ENV === "test" &&
+    (!process.env.GOOGLE_CALENDAR_TEST_TOKEN ||
+      !ownerUserId.startsWith("calendar-sync-test-"))
+  ) {
+    return;
+  }
+  try {
+    const now = new Date();
+    const openPolls = await db
+      .select({
+        id: pollsTable.id,
+        shareId: pollsTable.shareId,
+        title: pollsTable.title,
+      })
+      .from(pollsTable)
+      .where(
+        and(
+          eq(pollsTable.ownerUserId, ownerUserId),
+          isNull(pollsTable.confirmedCandidateId),
+          or(isNull(pollsTable.deadline), gt(pollsTable.deadline, now)),
+        ),
+      );
+    
+    for (const poll of openPolls) {
+      const candidates = await db
+        .select()
+        .from(pollCandidatesTable)
+        .where(eq(pollCandidatesTable.pollId, poll.id));
+      
+      if (candidates.length === 0 || !candidates.some(c => c.startAt && c.endAt)) {
+        continue;
+      }
+      
+      const existingEvents = await db
+        .select({ candidateId: pollCalendarEventsTable.candidateId })
+        .from(pollCalendarEventsTable)
+        .where(
+          and(
+            eq(pollCalendarEventsTable.pollId, poll.id),
+            eq(pollCalendarEventsTable.kind, "tentative"),
+          ),
+        );
+      
+      if (existingEvents.length > 0) {
+        continue;
+      }
+      
+      await createTentativePollEvents({
+        pollId: poll.id,
+        ownerUserId,
+        shareUrl: `${baseUrl}/p/${encodeURIComponent(poll.shareId)}`,
+      });
+    }
+  } catch (error) {
+    logger.error(
+      { err: error, ownerUserId },
+      "Failed to sync open polls tentative events",
+    );
+  }
 }
 
 export function startCalendarSyncWorker(): NodeJS.Timeout {
