@@ -851,6 +851,18 @@ components:
             type: string
             minLength: 1
             maxLength: 100
+        removedCandidateIds:
+          type: array
+          maxItems: 20
+          items:
+            type: number
+        expectedCandidateIds:
+          type: array
+          maxItems: 20
+          items:
+            type: number
+        organizerResponse:
+          $ref: "#/components/schemas/PollResponseInput"
     PollResponseInput:
       type: object
       required: [name, answers]

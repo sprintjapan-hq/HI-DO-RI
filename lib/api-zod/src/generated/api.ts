@@ -298,12 +298,29 @@ export const updatePollBodyNewCandidatesItemMax = 100;
 
 export const updatePollBodyNewCandidatesMax = 20;
 
+export const updatePollBodyRemovedCandidateIdsMax = 20;
+
+export const updatePollBodyExpectedCandidateIdsMax = 20;
+
+export const updatePollBodyOrganizerResponseNameMax = 80;
+
+export const updatePollBodyOrganizerResponseAnswersMax = 20;
+
+export const updatePollBodyOrganizerResponseCommentMax = 500;
+
 
 
 export const UpdatePollBody = zod.object({
   "title": zod.string().min(1).max(updatePollBodyTitleMax),
   "note": zod.string().max(updatePollBodyNoteMax),
-  "newCandidates": zod.array(zod.string().min(1).max(updatePollBodyNewCandidatesItemMax)).max(updatePollBodyNewCandidatesMax)
+  "newCandidates": zod.array(zod.string().min(1).max(updatePollBodyNewCandidatesItemMax)).max(updatePollBodyNewCandidatesMax),
+  "removedCandidateIds": zod.array(zod.number()).max(updatePollBodyRemovedCandidateIdsMax).optional(),
+  "expectedCandidateIds": zod.array(zod.number()).max(updatePollBodyExpectedCandidateIdsMax).optional(),
+  "organizerResponse": zod.object({
+  "name": zod.string().min(1).max(updatePollBodyOrganizerResponseNameMax),
+  "answers": zod.array(zod.enum(['yes', 'maybe', 'no'])).min(1).max(updatePollBodyOrganizerResponseAnswersMax),
+  "comment": zod.string().max(updatePollBodyOrganizerResponseCommentMax).nullish()
+}).optional()
 })
 
 export const UpdatePollResponse = zod.object({

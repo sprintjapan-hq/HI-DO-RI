@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useLocation, useParams } from "wouter";
 import { useUser } from "@clerk/react";
 import { useForm, useFieldArray } from "react-hook-form";
@@ -9,6 +9,7 @@ import {
   useGetPoll, 
   useUpdatePoll,
   getGetPollQueryKey,
+  getGetCalendarConnectionQueryKey,
   getListOrganizerPollsQueryKey
 } from "@workspace/api-client-react";
 import { Layout } from "@/components/layout";
@@ -18,6 +19,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Loader2, Calendar, AlertCircle, Plus, Trash2, ArrowLeft, Save } from "lucide-react";
 import { toast } from "sonner";
+import { OrganizerAvailability, type OrganizerAvailabilityDraft } from "@/components/organizer-availability";
+import { CalendarConnection } from "@/components/calendar-connection";
 
 const baseSchema = z.object({
   title: z.string().trim().min(1, "イベント名を入力してください").max(100, "100文字以内で入力してください"),
@@ -36,23 +39,30 @@ export default function EditPoll() {
   const params = useParams<{ shareId: string }>();
   const { user } = useUser();
   const queryClient = useQueryClient();
+  const [removedIds, setRemovedIds] = useState<number[]>([]);
+  const [availability, setAvailability] = useState<OrganizerAvailabilityDraft>({
+    enabled: false, name: "", answers: {}, comment: "",
+  });
+  const [needsReconnect, setNeedsReconnect] = useState(false);
   
   const shareId = params.shareId || "";
   const { data: poll, isLoading, isError } = useGetPoll(shareId, {
     query: {
       enabled: !!user && !!shareId,
       queryKey: [...getGetPollQueryKey(shareId), user?.id],
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
     },
   });
   const updatePoll = useUpdatePoll();
 
-  const { register, control, handleSubmit, reset, formState: { errors } } = useForm<FormValues>({
+  const { register, control, handleSubmit, reset, watch, formState: { errors } } = useForm<FormValues>({
     resolver: zodResolver(
       baseSchema.refine((data) => {
-        const existingCount = poll?.candidates.length || 0;
-        return existingCount + data.newCandidates.length <= 20;
+        const existingCount = (poll?.candidates.length || 0) - removedIds.length;
+        return existingCount + data.newCandidates.length >= 2 && existingCount + data.newCandidates.length <= 20;
       }, {
-        message: "候補日は合計20件までです",
+        message: "候補日は合計2〜20件にしてください",
         path: ["newCandidates"]
       })
     ),
@@ -71,11 +81,24 @@ export default function EditPoll() {
         note: poll.note,
         newCandidates: []
       });
+      setRemovedIds([]);
+      setAvailability({ enabled: false, name: "", answers: {}, comment: "" });
     }
   }, [poll, reset]);
 
   const onSubmit = (data: FormValues) => {
     if (!poll) return;
+    const candidateKeys = [
+      ...poll.candidates.filter((candidate) => !removedIds.includes(candidate.id)).map((candidate) => String(candidate.id)),
+      ...fields.map((field) => field.id),
+    ];
+    if (availability.enabled && (!availability.name.trim() || candidateKeys.some((key) => !availability.answers[key]))) {
+      toast.error("自分の名前と、すべての候補日の○・△・×を入力してください。");
+      return;
+    }
+    if (removedIds.length > 0 && !window.confirm(
+      `${removedIds.length}件の候補日と、その候補日への回答を削除します。Googleカレンダーの対応する仮予定も削除します。保存してよろしいですか？`,
+    )) return;
 
     updatePoll.mutate({
       shareId: poll.shareId,
@@ -83,6 +106,15 @@ export default function EditPoll() {
         title: data.title,
         note: data.note || "",
         newCandidates: data.newCandidates.map((c) => c.label),
+        removedCandidateIds: removedIds,
+        expectedCandidateIds: poll.candidates.map((candidate) => candidate.id),
+        ...(availability.enabled ? {
+          organizerResponse: {
+            name: availability.name.trim(),
+            answers: candidateKeys.map((key) => availability.answers[key]),
+            comment: availability.comment,
+          },
+        } : {}),
       }
     }, {
       onSuccess: () => {
@@ -93,6 +125,10 @@ export default function EditPoll() {
       },
       onError: (error) => {
         const apiMessage = (error as { data?: { error?: string } }).data?.error;
+        if ((error as { data?: { code?: string } }).data?.code === "google_calendar_reconnect_required") {
+          setNeedsReconnect(true);
+          queryClient.invalidateQueries({ queryKey: getGetCalendarConnectionQueryKey() });
+        }
         toast.error(apiMessage ?? "保存に失敗しました。もう一度お試しください。");
       }
     });
@@ -160,7 +196,9 @@ export default function EditPoll() {
     );
   }
 
-  const isMaxCandidates = poll.candidates.length + fields.length >= 20;
+  const candidateCount = poll.candidates.length - removedIds.length + fields.length;
+  const isMaxCandidates = candidateCount >= 20;
+  const newCandidateValues = watch("newCandidates");
   
   return (
     <Layout>
@@ -170,12 +208,16 @@ export default function EditPoll() {
             イベントの編集
           </h1>
           <p className="text-sm text-muted-foreground">
-            イベントの内容を変更したり、新しい候補日を追加できます。既存の候補日は変更できません。
+            候補日の追加・削除と、自分の出欠を変更できます。日時の差し替えは古い候補を削除して新しく追加してください。
           </p>
         </div>
 
         <div className="overflow-hidden rounded-xl border border-border/80 bg-card shadow-sm">
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-8 p-6 sm:p-8" data-testid="form-edit-poll">
+            {needsReconnect && <div className="space-y-3" role="alert">
+              <p className="text-sm text-destructive">仮予定の削除にはGoogleカレンダーの再接続が必要です。再接続後にもう一度保存してください。</p>
+              <CalendarConnection />
+            </div>}
             <div className="space-y-2">
               <Label htmlFor="title">イベント名</Label>
               <Input 
@@ -208,17 +250,27 @@ export default function EditPoll() {
                 {poll.candidates.map((c) => (
                   <div key={c.id} className="flex items-center gap-2 text-sm text-muted-foreground font-medium" data-testid={`item-existing-candidate-${c.id}`}>
                     <Calendar className="h-4 w-4 shrink-0 text-muted-foreground/60" />
-                    <span>{c.label}</span>
+                    <span className={`min-w-0 flex-1 break-words ${removedIds.includes(c.id) ? "line-through opacity-50" : ""}`}>{c.label}</span>
+                    <Button type="button" variant="ghost" size="sm"
+                      disabled={updatePoll.isPending}
+                      aria-label={`${c.label}を${removedIds.includes(c.id) ? "削除取消" : "削除"}`}
+                      onClick={() => setRemovedIds((current) => current.includes(c.id) ? current.filter((id) => id !== c.id) : [...current, c.id])}
+                      data-testid={`button-remove-existing-${c.id}`}>
+                      {removedIds.includes(c.id) ? "元に戻す" : <><Trash2 className="mr-1 h-4 w-4" />削除</>}
+                    </Button>
                   </div>
                 ))}
               </div>
+              {removedIds.length > 0 && <p className="text-xs text-destructive" role="status">
+                {removedIds.length}件を削除予定です。保存すると、その候補への全員の回答と対応する仮予定も削除されます。残りの候補への回答は保持されます。
+              </p>}
             </div>
 
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <Label>新しい候補日の追加</Label>
                 <span className="text-xs text-muted-foreground">
-                  合計 {poll.candidates.length + fields.length} / 20 件
+                  合計 {candidateCount} / 20 件
                 </span>
               </div>
               
@@ -245,6 +297,7 @@ export default function EditPoll() {
                         size="icon"
                         className="shrink-0 text-muted-foreground hover:text-destructive"
                         onClick={() => remove(index)}
+                        aria-label={`新しい候補日${index + 1}を削除`}
                         data-testid={`button-remove-candidate-${index}`}
                       >
                         <Trash2 className="h-4 w-4" />
@@ -273,6 +326,17 @@ export default function EditPoll() {
                 候補日を追加
               </Button>
             </div>
+
+            <OrganizerAvailability
+              candidates={[
+                ...poll.candidates.filter((candidate) => !removedIds.includes(candidate.id)).map((candidate) => ({ key: String(candidate.id), label: candidate.label })),
+                ...fields.map((field, index) => ({ key: field.id, label: newCandidateValues[index]?.label ?? "" })),
+              ]}
+              existingCandidates={poll.candidates}
+              responses={poll.responses}
+              value={availability}
+              onChange={setAvailability}
+            />
 
             <div className="flex flex-col-reverse gap-3 border-t border-border/70 pt-6 sm:flex-row sm:justify-end">
               <Button 

@@ -1,15 +1,17 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { Router, type IRouter } from "express";
-import { and, asc, desc, eq, gte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { getAuth } from "@clerk/express";
 import {
   db,
   pollCandidatesTable,
+  pollCalendarEventsTable,
   pollResponsesTable,
   pollsTable,
 } from "@workspace/db";
 import {
   createTentativePollEvents,
+  removeCandidateCalendarEvents,
   GOOGLE_CALENDAR_RECONNECT_ERROR_CODE,
   synchronizePollCalendarEvents,
 } from "../lib/google-calendar";
@@ -32,6 +34,7 @@ import {
   UpdatePollParams,
   UpdatePollResponse,
 } from "@workspace/api-zod";
+import { retainCandidateAnswers } from "../lib/poll-candidate-edit";
 
 const router: IRouter = Router();
 const MAX_POLLS_PER_24_HOURS = 10;
@@ -314,6 +317,8 @@ router.patch("/polls/:shareId", async (req, res): Promise<void> => {
   const title = body.data.title.trim();
   const note = body.data.note.trim();
   const newCandidates = body.data.newCandidates.map((candidate) => candidate.trim()).filter(Boolean);
+  const removedIds = new Set(body.data.removedCandidateIds ?? []);
+  const organizerResponse = body.data.organizerResponse;
   if (!title) {
     res.status(400).json({ error: "イベント名を入力してください。" });
     return;
@@ -342,8 +347,56 @@ router.patch("/polls/:shareId", async (req, res): Promise<void> => {
       .from(pollCandidatesTable)
       .where(eq(pollCandidatesTable.pollId, poll.id))
       .orderBy(asc(pollCandidatesTable.position));
-    if (existingCandidates.length + newCandidates.length > 20) {
-      return { status: 400, error: "候補日は合計20件までです。" } as const;
+    const expectedIds = body.data.expectedCandidateIds;
+    if (
+      ((removedIds.size > 0 || organizerResponse) && !expectedIds) ||
+      (expectedIds && (expectedIds.length !== existingCandidates.length ||
+        expectedIds.some((id, index) => id !== existingCandidates[index].id)))
+    ) {
+      return { status: 409, error: "候補日が更新されています。ページを再読み込みしてから編集してください。" } as const;
+    }
+    if ([...removedIds].some((id) => !existingCandidates.some((candidate) => candidate.id === id))) {
+      return { status: 400, error: "削除する候補日を確認してください。" } as const;
+    }
+    const retainedIndices = existingCandidates.flatMap((candidate, index) => removedIds.has(candidate.id) ? [] : [index]);
+    const finalCount = retainedIndices.length + newCandidates.length;
+    if (finalCount < 2 || finalCount > 20) {
+      return { status: 400, error: "候補日は合計2〜20件にしてください。" } as const;
+    }
+    if (organizerResponse && (!organizerResponse.name.trim() || organizerResponse.answers.length !== finalCount)) {
+      return { status: 400, error: "主催者のお名前と、すべての候補日の出欠を入力してください。" } as const;
+    }
+    if (removedIds.size > 0) {
+      const events = await tx.select({ googleEventId: pollCalendarEventsTable.googleEventId })
+        .from(pollCalendarEventsTable).where(and(
+          eq(pollCalendarEventsTable.pollId, poll.id),
+          eq(pollCalendarEventsTable.kind, "tentative"),
+          inArray(pollCalendarEventsTable.candidateId, [...removedIds]),
+        ));
+      const cleanup = await removeCandidateCalendarEvents(userId, events);
+      if (cleanup.status === "reconnect_required") {
+        return {
+          status: 409,
+          code: GOOGLE_CALENDAR_RECONNECT_ERROR_CODE,
+          error: "仮予定を削除するため、Googleカレンダーを再接続してください。変更は保存されていません。",
+        } as const;
+      }
+      if (cleanup.status !== "ok") {
+        return { status: 502, error: "Googleカレンダーの仮予定を削除できませんでした。時間をおいて再度保存してください。" } as const;
+      }
+
+      const responses = await tx.select().from(pollResponsesTable).where(eq(pollResponsesTable.pollId, poll.id));
+      for (const response of responses) {
+        await tx.update(pollResponsesTable).set({
+          answers: retainCandidateAnswers(response.answers, retainedIndices),
+        }).where(eq(pollResponsesTable.id, response.id));
+      }
+      await tx.delete(pollCandidatesTable).where(and(
+        eq(pollCandidatesTable.pollId, poll.id), inArray(pollCandidatesTable.id, [...removedIds]),
+      ));
+      for (const [position, oldIndex] of retainedIndices.entries()) {
+        await tx.update(pollCandidatesTable).set({ position }).where(eq(pollCandidatesTable.id, existingCandidates[oldIndex].id));
+      }
     }
 
     await tx
@@ -356,15 +409,31 @@ router.patch("/polls/:shareId", async (req, res): Promise<void> => {
         newCandidates.map((label, index) => ({
           pollId: poll.id,
           label,
-          position: existingCandidates.length + index,
+          position: retainedIndices.length + index,
         })),
       );
+    }
+
+    if (organizerResponse) {
+      await tx.insert(pollResponsesTable).values({
+        pollId: poll.id,
+        name: organizerResponse.name.trim(),
+        answers: organizerResponse.answers,
+        comment: organizerResponse.comment?.trim() || null,
+      }).onConflictDoUpdate({
+        target: [pollResponsesTable.pollId, pollResponsesTable.name],
+        set: {
+          answers: organizerResponse.answers,
+          comment: organizerResponse.comment?.trim() || null,
+          updatedAt: new Date(),
+        },
+      });
     }
 
     return { status: 200 } as const;
   });
   if (result.status !== 200) {
-    res.status(result.status).json({ error: result.error });
+    res.status(result.status).json({ error: result.error, ...("code" in result ? { code: result.code } : {}) });
     return;
   }
 

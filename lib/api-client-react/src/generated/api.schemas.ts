@@ -193,22 +193,6 @@ export interface PollInput {
   candidateSlots?: CalendarCandidateSlot[];
 }
 
-export interface PollUpdate {
-  /**
-     * @minLength 1
-     * @maxLength 100
-     */
-  title: string;
-  /** @maxLength 500 */
-  note: string;
-  /**
-     * @maxItems 20
-     * @items.minLength 1
-     * @items.maxLength 100
-     */
-  newCandidates: string[];
-}
-
 export type PollResponseInputAnswersItem = typeof PollResponseInputAnswersItem[keyof typeof PollResponseInputAnswersItem];
 
 
@@ -234,6 +218,27 @@ export interface PollResponseInput {
      * @nullable
      */
   comment?: string | null;
+}
+
+export interface PollUpdate {
+  /**
+     * @minLength 1
+     * @maxLength 100
+     */
+  title: string;
+  /** @maxLength 500 */
+  note: string;
+  /**
+     * @maxItems 20
+     * @items.minLength 1
+     * @items.maxLength 100
+     */
+  newCandidates: string[];
+  /** @maxItems 20 */
+  removedCandidateIds?: number[];
+  /** @maxItems 20 */
+  expectedCandidateIds?: number[];
+  organizerResponse?: PollResponseInput;
 }
 
 export interface PollConfirmationInput {

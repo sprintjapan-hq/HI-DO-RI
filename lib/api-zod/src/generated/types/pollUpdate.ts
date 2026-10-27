@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { PollResponseInput } from './pollResponseInput';
 
 export interface PollUpdate {
   /**
@@ -20,4 +21,9 @@ export interface PollUpdate {
      * @items.maxLength 100
      */
   newCandidates: string[];
+  /** @maxItems 20 */
+  removedCandidateIds?: number[];
+  /** @maxItems 20 */
+  expectedCandidateIds?: number[];
+  organizerResponse?: PollResponseInput;
 }

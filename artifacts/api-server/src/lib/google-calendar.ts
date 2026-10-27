@@ -19,6 +19,33 @@ export const CALENDAR_FREEBUSY_SCOPE =
   "https://www.googleapis.com/auth/calendar.freebusy";
 export const CALENDAR_EVENTS_SCOPE =
   "https://www.googleapis.com/auth/calendar.events";
+
+/** Remove external events before their candidate references are deleted. */
+export async function removeCandidateCalendarEvents(
+  ownerUserId: string,
+  events: Array<{ googleEventId: string }>,
+): Promise<{ status: "ok" | "reconnect_required" | "unavailable" }> {
+  if (events.length === 0) return { status: "ok" };
+  const access = await getGoogleAccess(ownerUserId);
+  if (access.status === "unavailable") return { status: "unavailable" };
+  if (access.status !== "connected" || !access.scopes.includes(CALENDAR_EVENTS_SCOPE)) {
+    return { status: "reconnect_required" };
+  }
+  for (const event of events) {
+    try {
+      const response = await googleRequest(
+        access.token,
+        `/calendar/v3/calendars/primary/events/${encodeURIComponent(event.googleEventId)}?sendUpdates=none`,
+        { method: "DELETE" },
+      );
+      if (response.status === 401 || response.status === 403) return { status: "reconnect_required" };
+      if (!response.ok && response.status !== 404 && response.status !== 410) return { status: "unavailable" };
+    } catch {
+      return { status: "unavailable" };
+    }
+  }
+  return { status: "ok" };
+}
 const REQUIRED_SCOPES = [
   CALENDAR_FREEBUSY_SCOPE,
   CALENDAR_EVENTS_SCOPE,
