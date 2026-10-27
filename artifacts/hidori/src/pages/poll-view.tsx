@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLocation, useParams } from "wouter";
 import { useUser } from "@clerk/react";
 import { useForm, Controller } from "react-hook-form";
@@ -70,6 +70,13 @@ export default function PollView() {
   });
   const createCalendarEvent = useCreateCalendarEvent();
   const [calendarEventLink, setCalendarEventLink] = useState<string | null>(null);
+  const [editingResponse, setEditingResponse] = useState<{
+    id: number;
+    name: string;
+    candidateIds: number[];
+  } | null>(null);
+  const responseFormRef = useRef<HTMLFormElement>(null);
+  const responseHeadingRef = useRef<HTMLHeadingElement>(null);
 
   const { register, handleSubmit, control, formState, reset } = useForm<ResponseFormValues>({
     resolver: zodResolver(responseSchema),
@@ -82,14 +89,41 @@ export default function PollView() {
 
   // Initialize form when poll data loads
   useEffect(() => {
-    if (poll && !formState.isDirty && formState.submitCount === 0) {
+    if (poll && !editingResponse && !formState.isDirty && formState.submitCount === 0) {
       reset({
         name: "",
         answers: poll.candidates.map(() => "yes"),
         comment: ""
       });
     }
-  }, [poll, reset, formState.isDirty, formState.submitCount]);
+  }, [poll, reset, formState.isDirty, formState.submitCount, editingResponse]);
+
+  const editResponse = (responseId: number) => {
+    if (!poll || poll.isClosed || createResponse.isPending) return;
+    const response = poll.responses.find((item) => item.id === responseId);
+    if (!response) return;
+    if (formState.isDirty && !window.confirm("入力中の内容を破棄して、この回答を読み込みますか？")) return;
+    setEditingResponse({
+      id: response.id,
+      name: response.name,
+      candidateIds: poll.candidates.map((candidate) => candidate.id),
+    });
+    reset({
+      name: response.name,
+      // Added dates stay unanswered until the respondent chooses an answer.
+      answers: poll.candidates.map((_, index) => response.answers[index]),
+      comment: response.comment ?? "",
+    });
+    responseFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    responseHeadingRef.current?.focus({ preventScroll: true });
+  };
+
+  const cancelResponseEdit = () => {
+    if (!poll) return;
+    if (formState.isDirty && !window.confirm("回答の変更を取り消しますか？")) return;
+    setEditingResponse(null);
+    reset({ name: "", answers: poll.candidates.map(() => "yes"), comment: "" });
+  };
 
   const [copiedUrl, setCopiedUrl] = useState<"share" | "admin" | null>(null);
   const shareUrl = window.location.origin + window.location.pathname; // remove query string
@@ -143,21 +177,29 @@ export default function PollView() {
 
   const onSubmit = (data: ResponseFormValues) => {
     if (!poll) return;
-    if (deadlinePassed) {
+    if (poll.isClosed || deadlinePassed) {
       toast.error("このイベントの回答受付は終了しています。");
+      return;
+    }
+    if (editingResponse && (
+      editingResponse.candidateIds.length !== poll.candidates.length ||
+      editingResponse.candidateIds.some((id, index) => id !== poll.candidates[index].id)
+    )) {
+      toast.error("候補日が更新されています。「回答を変更」から最新の候補日を読み込み直してください。");
       return;
     }
     
     createResponse.mutate({
       shareId: poll.shareId,
       data: {
-        name: data.name,
+        name: editingResponse?.name ?? data.name,
         answers: data.answers as PollResponseInputAnswersItem[],
         comment: data.comment || undefined,
       }
     }, {
       onSuccess: () => {
-        toast.success("回答を送信しました");
+        toast.success(editingResponse ? "回答を更新しました" : "回答を送信しました");
+        setEditingResponse(null);
         queryClient.invalidateQueries({ queryKey: getGetPollQueryKey(poll.shareId) });
         queryClient.invalidateQueries({ queryKey: getListOrganizerPollsQueryKey() });
         // Scroll to top of table
@@ -169,8 +211,9 @@ export default function PollView() {
           comment: ""
         });
       },
-      onError: () => {
-        toast.error("送信に失敗しました。もう一度お試しください。");
+      onError: (error) => {
+        const message = (error as { data?: { error?: string } }).data?.error;
+        toast.error(message ?? "送信に失敗しました。もう一度お試しください。");
       }
     });
   };
@@ -402,6 +445,17 @@ export default function PollView() {
                             {r.comment}
                           </span>
                         )}
+                        {!poll.isClosed && (
+                          <Button type="button" variant="ghost" size="sm"
+                            className="h-auto justify-start self-start px-0 py-1 text-xs text-primary"
+                            onClick={() => editResponse(r.id)}
+                            disabled={createResponse.isPending}
+                            aria-label={`${r.name}さんの回答を変更`}
+                            data-testid={`button-edit-response-${r.id}`}>
+                            <Pencil className="mr-1 h-3 w-3" />
+                            回答を変更
+                          </Button>
+                        )}
                       </div>
                     </td>
                     {poll.candidates.map((c, i) => {
@@ -430,12 +484,17 @@ export default function PollView() {
         {/* Input Form Section */}
         <div className="bg-card rounded-lg border border-border/80 shadow-sm overflow-hidden mt-8">
           <div className="p-6 border-b border-border/40 bg-muted/10">
-            <h2 className="text-lg font-serif font-bold flex items-center gap-2">
+            <h2 ref={responseHeadingRef} tabIndex={-1} className="text-lg font-serif font-bold flex items-center gap-2 outline-none">
               <Calendar className="h-5 w-5 text-primary" />
-              出欠を入力する
+              {editingResponse ? `${editingResponse.name}さんの回答を変更` : "出欠を入力する"}
             </h2>
           </div>
-          <form onSubmit={handleSubmit(onSubmit)} className="p-6 sm:p-8 space-y-8">
+          <form ref={responseFormRef} onSubmit={handleSubmit(onSubmit)} className="scroll-mt-20 p-6 sm:p-8 space-y-8">
+            <p className="text-sm leading-relaxed text-muted-foreground">
+              {editingResponse
+                ? "入力済みの○・△・×とコメントを読み込みました。変更して保存すると、元の回答を更新します。"
+                : "入力済みの自分の予定を変える場合は、上の表の自分の名前にある「回答を変更」を押してください。"}
+            </p>
             <div className="space-y-2">
               <Label htmlFor="name" className="text-base">お名前</Label>
               <Input 
@@ -443,10 +502,18 @@ export default function PollView() {
                 placeholder="例: 山田 太郎" 
                 className="text-base py-5 max-w-sm bg-background/50 focus:bg-background"
                 {...register("name")} 
+                readOnly={!!editingResponse}
+                data-testid="input-response-name"
               />
+              {editingResponse && <p className="text-xs text-muted-foreground">元の回答を更新するため、名前は固定されています。</p>}
               {formState.errors.name && <p className="text-sm text-destructive mt-1">{formState.errors.name.message}</p>}
             </div>
 
+            {formState.errors.answers && (
+              <p className="text-sm text-destructive" role="alert">
+                追加された候補日も含め、すべての候補日に○・△・×のいずれかを選んでください。
+              </p>
+            )}
             <div className="space-y-0 rounded-md border border-border/50 overflow-hidden divide-y divide-border/50">
               {poll.candidates.map((c, i) => (
                 <div key={c.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-background/30 hover:bg-muted/20 transition-colors gap-4">
@@ -457,7 +524,7 @@ export default function PollView() {
                     render={({ field }) => (
                       <div className="flex bg-muted/40 p-1 rounded-md border border-border/60 shrink-0">
                         <label className="flex-1 sm:flex-none cursor-pointer relative group">
-                          <input disabled={deadlinePassed} type="radio" className="sr-only" value="yes" checked={field.value === "yes"} onChange={() => field.onChange("yes")} />
+                          <input aria-label={`${c.label}：○`} disabled={poll.isClosed || deadlinePassed || createResponse.isPending} type="radio" className="sr-only" value="yes" checked={field.value === "yes"} onChange={() => field.onChange("yes")} />
                           <div className={cn(
                             "px-5 py-2 rounded text-center text-sm font-bold transition-all",
                             field.value === "yes" 
@@ -466,7 +533,7 @@ export default function PollView() {
                           )}>○</div>
                         </label>
                         <label className="flex-1 sm:flex-none cursor-pointer relative group">
-                          <input disabled={deadlinePassed} type="radio" className="sr-only" value="maybe" checked={field.value === "maybe"} onChange={() => field.onChange("maybe")} />
+                          <input aria-label={`${c.label}：△`} disabled={poll.isClosed || deadlinePassed || createResponse.isPending} type="radio" className="sr-only" value="maybe" checked={field.value === "maybe"} onChange={() => field.onChange("maybe")} />
                           <div className={cn(
                             "px-5 py-2 rounded text-center text-sm font-bold transition-all",
                             field.value === "maybe" 
@@ -475,7 +542,7 @@ export default function PollView() {
                           )}>△</div>
                         </label>
                         <label className="flex-1 sm:flex-none cursor-pointer relative group">
-                          <input disabled={deadlinePassed} type="radio" className="sr-only" value="no" checked={field.value === "no"} onChange={() => field.onChange("no")} />
+                          <input aria-label={`${c.label}：×`} disabled={poll.isClosed || deadlinePassed || createResponse.isPending} type="radio" className="sr-only" value="no" checked={field.value === "no"} onChange={() => field.onChange("no")} />
                           <div className={cn(
                             "px-5 py-2 rounded text-center text-sm font-bold transition-all",
                             field.value === "no" 
@@ -503,19 +570,26 @@ export default function PollView() {
               {formState.errors.comment && <p className="text-sm text-destructive mt-1">{formState.errors.comment.message}</p>}
             </div>
 
-            <div className="pt-2">
+            <div className="flex flex-col gap-3 pt-2 sm:flex-row">
               <Button 
                 type="submit" 
                 size="lg" 
                 className="w-full sm:w-auto font-bold text-base px-10 py-6 h-auto transition-transform active:scale-95"
-                disabled={createResponse.isPending || deadlinePassed}
+                disabled={createResponse.isPending || poll.isClosed || deadlinePassed}
+                data-testid="button-save-response"
               >
                 {createResponse.isPending ? (
                   <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> 送信中...</>
                 ) : (
-                  <>入力する <ArrowRight className="ml-2 h-5 w-5 opacity-70" /></>
+                  <>{editingResponse ? "変更を保存する" : "入力する"} <ArrowRight className="ml-2 h-5 w-5 opacity-70" /></>
                 )}
               </Button>
+              {editingResponse && (
+                <Button type="button" variant="outline" size="lg" onClick={cancelResponseEdit}
+                  disabled={createResponse.isPending} className="h-auto py-6" data-testid="button-cancel-response-edit">
+                  変更を取り消す
+                </Button>
+              )}
             </div>
           </form>
         </div>

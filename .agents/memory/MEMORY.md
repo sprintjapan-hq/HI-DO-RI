@@ -2,6 +2,7 @@
 - [Local API test ports](local-api-test-ports.md) — reserve an ephemeral port and verify the API-specific health payload before integration tests.
 - [Legacy migration adoption](legacy-migration-adoption.md) — account for schema changes already applied by the former push workflow when seeding migration history.
 - [Added candidate response semantics](added-candidate-response-semantics.md) — dates appended after responses exist remain unanswered; never reinterpret them as ×.
+- [Submitted availability editing](submitted-response-editing.md) — existing answers must be editable from the attendance table; do not infer Clerk ownership from a matching name.
 - [Legacy ownership recovery](legacy-ownership-recovery.md) — ownerless events without admin keys can be safely claimed through a login-bound, one-time token flow.
 - [Organizer calendar ownership](calendar-connector-scope.md) — calendar access is Clerk-user-scoped; confirmed event times must come from server-owned poll data.
 - [Development milestone notifications](development-milestone-notifications.md) — structured progress and button-triggered completion notifications are confirmed end-to-end in Slack.
