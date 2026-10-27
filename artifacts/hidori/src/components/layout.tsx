@@ -107,7 +107,7 @@ export function Layout({ children }: { children: ReactNode }) {
             </Link>
           </nav>
           <p className="text-sm font-semibold tracking-[0.08em] text-foreground/90">
-            Produce by SPRINT Japan
+            Produced by SPRINT Japan
           </p>
         </div>
       </footer>
