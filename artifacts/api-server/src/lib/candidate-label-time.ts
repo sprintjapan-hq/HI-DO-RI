@@ -1,7 +1,7 @@
 /** Legacy labels use Tokyo time. Use the poll's creation year, not the cleanup year. */
 export function parseCandidateLabelTime(label: string, referenceDate: Date) {
   const match = label.normalize("NFKC").trim().match(
-    /^(?:(\d{4})\/)?(\d{1,2})\/(\d{1,2})(?:\([日月火水木金土](?:曜日|曜)?\))?\s+(\d{1,2}):(\d{2})\s*[〜～~\-–—]\s*(\d{1,2}):(\d{2})$/,
+    /^(?:(\d{4})\/)?(\d{1,2})\/(\d{1,2})(?:\([^)]*\))?\s+(\d{1,2}):(\d{2})\s*[〜～~\-–—]\s*(\d{1,2}):(\d{2})$/,
   );
   if (!match || !Number.isFinite(referenceDate.getTime())) return null;
   const year = match[1] ? Number(match[1]) : Number(

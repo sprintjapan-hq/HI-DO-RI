@@ -21,6 +21,14 @@ export const CALENDAR_FREEBUSY_SCOPE =
 export const CALENDAR_EVENTS_SCOPE =
   "https://www.googleapis.com/auth/calendar.events";
 
+/** Resolve stored timestamps or a legacy Japanese label, always in JST. */
+export function resolveCandidateTimeRange(
+  candidate: { label: string; startAt: Date | null; endAt: Date | null },
+  referenceDate: Date = new Date(),
+): { startAt: Date; endAt: Date } | null {
+  return resolveCandidateTime(candidate, referenceDate);
+}
+
 /** Remove external events before their candidate references are deleted. */
 export async function removeCandidateCalendarEvents(
   ownerUserId: string,
@@ -41,7 +49,7 @@ export async function removeCandidateCalendarEvents(
     .where(eq(pollsTable.id, pollId))
     .limit(1) : [];
   const candidatesWithTime = removedCandidates.flatMap((candidate) => {
-    const time = poll ? resolveCandidateTime(candidate, poll.createdAt) : null;
+    const time = poll ? resolveCandidateTimeRange(candidate, poll.createdAt) : null;
     return time ? [{ ...candidate, ...time }] : [];
   });
 
@@ -452,13 +460,11 @@ export async function createTentativePollEvents(input: {
     ),
   );
   
-  const candidatesWithTime = candidates.filter(
-    (c) =>
-      !existingCandidateIds.has(c.id) &&
-      c.startAt &&
-      c.endAt &&
-      c.endAt > c.startAt,
-  );
+  const candidatesWithTime = candidates.flatMap((candidate) => {
+    if (existingCandidateIds.has(candidate.id)) return [];
+    const time = resolveCandidateTimeRange(candidate, poll.createdAt);
+    return time ? [{ ...candidate, ...time }] : [];
+  });
   
   if (candidatesWithTime.length === 0) return;
   
@@ -470,14 +476,21 @@ export async function createTentativePollEvents(input: {
     const timeMin = new Date(Math.min(...allStartTimes));
     const timeMax = new Date(Math.max(...allEndTimes));
     
-    const response = await googleRequest(
-      access.token,
-      `/calendar/v3/calendars/primary/events?timeMin=${encodeURIComponent(timeMin.toISOString())}&timeMax=${encodeURIComponent(timeMax.toISOString())}&singleEvents=true`,
-      { method: "GET" },
-    );
+    let nextPageToken: string | undefined;
+    do {
+      const response = await googleRequest(
+        access.token,
+        `/calendar/v3/calendars/primary/events?timeMin=${encodeURIComponent(timeMin.toISOString())}&timeMax=${encodeURIComponent(timeMax.toISOString())}&singleEvents=true${nextPageToken ? `&pageToken=${encodeURIComponent(nextPageToken)}` : ""}`,
+        { method: "GET" },
+      );
     
-    if (response.ok) {
+      if (!response.ok) {
+        logger.warn({ pollId: poll.id, status: response.status },
+          "Cannot verify existing tentative events; skipping creation to prevent duplicates");
+        return;
+      }
       const data = (await response.json()) as {
+        nextPageToken?: string;
         items?: Array<{
           id?: string;
           htmlLink?: string;
@@ -488,6 +501,7 @@ export async function createTentativePollEvents(input: {
           extendedProperties?: { private?: Record<string, string> };
         }>;
       };
+      nextPageToken = data.nextPageToken;
       
       const expectedSummary = `[仮] ${poll.title}`;
       const shareUrlFragment = `/p/${poll.shareId}`;
@@ -531,12 +545,13 @@ export async function createTentativePollEvents(input: {
           });
         }
       }
-    }
+    } while (nextPageToken);
   } catch (error) {
     logger.warn(
       { err: error, pollId: poll.id },
-      "Failed to query existing Google Calendar events, will proceed with creation",
+      "Failed to query existing Google Calendar events; skipping creation to prevent duplicates",
     );
+    return;
   }
   
   await Promise.all(
@@ -625,12 +640,11 @@ export async function finalizePollCalendarEvents(input: {
   const candidate = await db.query.pollCandidatesTable.findFirst({
     where: eq(pollCandidatesTable.id, poll.confirmedCandidateId),
   });
+  const candidateTime = candidate ? resolveCandidateTimeRange(candidate, poll.createdAt) : null;
   if (
     !candidate ||
     candidate.pollId !== poll.id ||
-    !candidate.startAt ||
-    !candidate.endAt ||
-    candidate.endAt <= candidate.startAt
+    !candidateTime
   ) {
     return null;
   }
@@ -703,9 +717,10 @@ export async function finalizePollCalendarEvents(input: {
       .from(pollCandidatesTable)
       .where(eq(pollCandidatesTable.pollId, poll.id));
 
-    const candidatesWithTime = allCandidates.filter(
-      (c) => c.startAt && c.endAt && c.endAt > c.startAt,
-    );
+    const candidatesWithTime = allCandidates.flatMap((candidate) => {
+      const time = resolveCandidateTimeRange(candidate, poll.createdAt);
+      return time ? [{ ...candidate, ...time }] : [];
+    });
 
     if (candidatesWithTime.length > 0) {
       const allStartTimes = candidatesWithTime.map((c) => c.startAt!.getTime());
@@ -831,8 +846,8 @@ export async function finalizePollCalendarEvents(input: {
     eventId: googleEventId(poll.id, candidate.id, "confirmed"),
     summary: poll.title,
     description: `HI-DO-RIで日程調整したイベントです。\n${input.shareUrl}`,
-    startAt: candidate.startAt,
-    endAt: candidate.endAt,
+    startAt: candidateTime.startAt,
+    endAt: candidateTime.endAt,
     privateProperties: {
       hidoriShareId: poll.shareId,
       hidoriPollId: String(poll.id),
@@ -1090,6 +1105,7 @@ export async function syncOpenOwnerPollsTentativeEvents(
         id: pollsTable.id,
         shareId: pollsTable.shareId,
         title: pollsTable.title,
+        createdAt: pollsTable.createdAt,
       })
       .from(pollsTable)
       .where(
@@ -1106,21 +1122,7 @@ export async function syncOpenOwnerPollsTentativeEvents(
         .from(pollCandidatesTable)
         .where(eq(pollCandidatesTable.pollId, poll.id));
       
-      if (candidates.length === 0 || !candidates.some(c => c.startAt && c.endAt)) {
-        continue;
-      }
-      
-      const existingEvents = await db
-        .select({ candidateId: pollCalendarEventsTable.candidateId })
-        .from(pollCalendarEventsTable)
-        .where(
-          and(
-            eq(pollCalendarEventsTable.pollId, poll.id),
-            eq(pollCalendarEventsTable.kind, "tentative"),
-          ),
-        );
-      
-      if (existingEvents.length > 0) {
+      if (!candidates.some(candidate => resolveCandidateTimeRange(candidate, poll.createdAt))) {
         continue;
       }
       

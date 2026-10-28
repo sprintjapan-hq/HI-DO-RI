@@ -123,6 +123,17 @@ async function startGoogleServer() {
       return;
     }
 
+    if (req.method === "GET" && url.pathname === "/calendar/v3/calendars/primary/events") {
+      const timeMin = new Date(url.searchParams.get("timeMin")).getTime();
+      const timeMax = new Date(url.searchParams.get("timeMax")).getTime();
+      const items = [...googleEvents.values()].filter(event =>
+        new Date(event.start.dateTime).getTime() < timeMax &&
+        new Date(event.end.dateTime).getTime() > timeMin,
+      );
+      res.writeHead(200).end(JSON.stringify({ items }));
+      return;
+    }
+
     if (url.pathname.startsWith(eventPrefix)) {
       const eventId = decodeURIComponent(url.pathname.slice(eventPrefix.length));
       if (req.method === "GET") {

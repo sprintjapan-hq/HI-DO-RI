@@ -11,6 +11,7 @@ import {
 } from "@workspace/db";
 import {
   createTentativePollEvents,
+  resolveCandidateTimeRange,
   removeCandidateCalendarEvents,
   GOOGLE_CALENDAR_RECONNECT_ERROR_CODE,
   synchronizePollCalendarEvents,
@@ -415,11 +416,16 @@ router.patch("/polls/:shareId", async (req, res): Promise<void> => {
     let insertedCandidates: Array<{ id: number; label: string; position: number }> = [];
     if (newCandidates.length > 0) {
       insertedCandidates = await tx.insert(pollCandidatesTable).values(
-        newCandidates.map((label, index) => ({
-          pollId: poll.id,
-          label,
-          position: retainedIndices.length + index,
-        })),
+        newCandidates.map((label, index) => {
+          const time = resolveCandidateTimeRange({ label, startAt: null, endAt: null }, poll.createdAt);
+          return {
+            pollId: poll.id,
+            label,
+            startAt: time?.startAt ?? null,
+            endAt: time?.endAt ?? null,
+            position: retainedIndices.length + index,
+          };
+        }),
       ).returning();
     }
 
