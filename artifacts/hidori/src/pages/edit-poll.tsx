@@ -36,8 +36,9 @@ type FormValues = z.infer<typeof baseSchema>;
 
 export default function EditPoll() {
   const [, setLocation] = useLocation();
+  const [location] = useLocation();
   const params = useParams<{ shareId: string }>();
-  const { user } = useUser();
+  const { user, isLoaded: isUserLoaded } = useUser();
   const queryClient = useQueryClient();
   const [removedIds, setRemovedIds] = useState<number[]>([]);
   const [availability, setAvailability] = useState<OrganizerAvailabilityDraft>({
@@ -46,6 +47,9 @@ export default function EditPoll() {
   const [needsReconnect, setNeedsReconnect] = useState(false);
   
   const shareId = params.shareId || "";
+  const searchParams = new URLSearchParams(location.split("?")[1] ?? "");
+  const adminKey = searchParams.get("admin") ?? "";
+  
   const { data: poll, isLoading, isError } = useGetPoll(shareId, {
     query: {
       enabled: !!user && !!shareId,
@@ -140,6 +144,30 @@ export default function EditPoll() {
         <div className="flex flex-col items-center justify-center py-20 text-muted-foreground" data-testid="status-loading">
           <Loader2 className="h-8 w-8 animate-spin mb-4 text-primary/50" />
           <p className="animate-pulse">読み込み中...</p>
+        </div>
+      </Layout>
+    );
+  }
+
+  if (isUserLoaded && !user && !adminKey) {
+    return (
+      <Layout>
+        <div className="text-center py-20">
+          <div className="bg-primary/10 text-primary inline-flex h-16 w-16 items-center justify-center rounded-full mb-4">
+            <AlertCircle className="h-8 w-8" />
+          </div>
+          <h1 className="text-xl font-bold mb-2">イベントの編集には主催者ログインが必要です</h1>
+          <p className="text-muted-foreground mb-6">
+            主催者としてログインすると、イベントの内容を編集できます。
+          </p>
+          <div className="flex flex-col sm:flex-row gap-3 justify-center">
+            <Button variant="default" onClick={() => setLocation("/sign-in")}>
+              ログイン
+            </Button>
+            <Button variant="outline" onClick={() => setLocation(`/p/${shareId}`)}>
+              <ArrowLeft className="mr-2 h-4 w-4" /> 出欠表へ戻る
+            </Button>
+          </div>
         </div>
       </Layout>
     );

@@ -125,8 +125,8 @@ export default function PollView() {
     reset({ name: "", answers: poll.candidates.map(() => "yes"), comment: "" });
   };
 
-  const [copiedUrl, setCopiedUrl] = useState<"share" | "admin" | null>(null);
-  const shareUrl = window.location.origin + window.location.pathname; // remove query string
+  const [copiedUrl, setCopiedUrl] = useState<"share" | "admin" | "invitation" | "confirmed" | null>(null);
+  const shareUrl = window.location.origin + window.location.pathname;
   const adminUrl = `${shareUrl}?admin=${encodeURIComponent(adminKey)}`;
 
   const copyToClipboard = async (url: string, kind: "share" | "admin") => {
@@ -134,6 +134,49 @@ export default function PollView() {
       await navigator.clipboard.writeText(url);
       setCopiedUrl(kind);
       toast.success("URLをコピーしました");
+      setTimeout(() => setCopiedUrl(null), 2000);
+    } catch {
+      toast.error("コピーに失敗しました");
+    }
+  };
+
+  const copyInvitationText = async () => {
+    if (!poll) return;
+    try {
+      const candidateLines = poll.candidates.map((c) => `・${c.label}`).join("\n");
+      const deadlineText = poll.deadline ? `（回答締切: ${formatDateTime(poll.deadline)}）\n\n` : "\n";
+      const invitationText = [
+        `【日程調整】${poll.title}`,
+        poll.note ? poll.note : "",
+        "",
+        "▼ 候補日時",
+        candidateLines,
+        deadlineText,
+        "▼ こちらのURLから○△×をご入力ください（ログイン不要）",
+        shareUrl,
+      ].filter((line) => line !== null).join("\n");
+      
+      await navigator.clipboard.writeText(invitationText);
+      setCopiedUrl("invitation");
+      toast.success("案内文と候補日をコピーしました");
+      setTimeout(() => setCopiedUrl(null), 2000);
+    } catch {
+      toast.error("コピーに失敗しました");
+    }
+  };
+
+  const copyConfirmedText = async () => {
+    if (!poll || !confirmedCandidate) return;
+    try {
+      const confirmedText = [
+        `【開催日確定】${poll.title}`,
+        `日時: ${confirmedCandidate.label}`,
+        `詳細・出欠表: ${shareUrl}`,
+      ].join("\n");
+      
+      await navigator.clipboard.writeText(confirmedText);
+      setCopiedUrl("confirmed");
+      toast.success("確定日時をコピーしました");
       setTimeout(() => setCopiedUrl(null), 2000);
     } catch {
       toast.error("コピーに失敗しました");
@@ -275,6 +318,22 @@ export default function PollView() {
               {copiedUrl === "share" ? "コピーしました" : "共有URLをコピー"}
             </Button>
           </div>
+          {!poll.isClosed && (
+            <div className="mt-4 pt-4 border-t border-primary/15">
+              <p className="text-sm font-medium text-foreground mb-3">
+                Slack・チャット用テキスト
+              </p>
+              <Button 
+                onClick={copyInvitationText} 
+                variant="outline" 
+                size="sm"
+                className="w-full sm:w-auto"
+              >
+                {copiedUrl === "invitation" ? <Check className="h-4 w-4 mr-2" /> : <Copy className="h-4 w-4 mr-2" />}
+                {copiedUrl === "invitation" ? "コピーしました" : "案内文と候補日をコピー"}
+              </Button>
+            </div>
+          )}
           {adminKey && (
           <div className="mt-5 pt-5 border-t border-primary/15">
             <p className="text-sm font-medium text-foreground mb-2 flex items-center gap-2">
@@ -326,12 +385,22 @@ export default function PollView() {
               <div className="rounded-full bg-primary text-primary-foreground p-2.5 shrink-0">
                 <Calendar className="h-5 w-5" />
               </div>
-              <div>
+              <div className="flex-1">
                 <p className="text-sm font-medium text-primary mb-1">開催日が確定しました</p>
                 <h2 className="text-xl sm:text-2xl font-serif font-bold text-foreground">
                   {confirmedCandidate.label}
                 </h2>
                 <p className="text-sm text-muted-foreground mt-2">回答受付は終了しています。</p>
+                <div className="mt-4">
+                  <Button 
+                    onClick={copyConfirmedText} 
+                    variant="outline" 
+                    size="sm"
+                  >
+                    {copiedUrl === "confirmed" ? <Check className="h-4 w-4 mr-2" /> : <Copy className="h-4 w-4 mr-2" />}
+                    {copiedUrl === "confirmed" ? "コピーしました" : "確定日時をコピー"}
+                  </Button>
+                </div>
                 {isAdmin && confirmedCandidate.start && confirmedCandidate.end && (
                   <div className="mt-4 border-t border-primary/20 pt-4">
                     <CalendarConnection />

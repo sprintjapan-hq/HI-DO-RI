@@ -7,6 +7,7 @@ import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { formatDateTime } from "@/lib/events";
 import { toast } from "sonner";
+import { CalendarConnection } from "@/components/calendar-connection";
 
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -67,6 +68,12 @@ export default function MyPage() {
             </Link>
           </Button>
         </header>
+
+        {user && (
+          <div className="mb-6">
+            <CalendarConnection />
+          </div>
+        )}
 
         {isLoading && (
           <div className="flex flex-col items-center justify-center py-24">
