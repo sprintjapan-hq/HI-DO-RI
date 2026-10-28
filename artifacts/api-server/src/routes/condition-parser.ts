@@ -158,7 +158,7 @@ export function parseCondition(condition: string, now: Date) {
   let invalidDateRange = false;
   let hasDateReference = false;
 
-  const relativeMatch = condition.match(/(?:^|[、。\s])(明日|明後日|今週|来週|今月|来月)(?=$|[、。\sの])/);
+  const relativeMatch = condition.match(/(?:^|[、。\s])(明日|明後日|今週|来週|今月|来月|今月末まで|来月末まで)(?=$|[、。\sの])/);
 
   if (relativeMatch) {
     hasDateReference = true;
@@ -188,12 +188,12 @@ export function parseCondition(condition: string, now: Date) {
       const nextMondayParts = tokyoDateParts(nextMonday);
       rangeStart = tokyoOffsetDate(Number(nextMondayParts.year), Number(nextMondayParts.month), Number(nextMondayParts.day), 0);
       rangeEnd = new Date(rangeStart.getTime() + 7 * 24 * 60 * 60 * 1000);
-    } else if (relative === "今月") {
+    } else if (relative === "今月" || relative === "今月末まで") {
       const lastDayOfMonth = new Date(currentYear, currentMonth, 0);
       const lastDayParts = tokyoDateParts(lastDayOfMonth);
       rangeStart = tokyoOffsetDate(currentYear, currentMonth, currentDay, 0);
       rangeEnd = tokyoOffsetDate(Number(lastDayParts.year), Number(lastDayParts.month), Number(lastDayParts.day), 24);
-    } else if (relative === "来月") {
+    } else if (relative === "来月" || relative === "来月末まで") {
       const nextMonth = currentMonth === 12 ? 1 : currentMonth + 1;
       const nextYear = currentMonth === 12 ? currentYear + 1 : currentYear;
       const lastDayOfNextMonth = new Date(nextYear, nextMonth, 0);
@@ -203,9 +203,42 @@ export function parseCondition(condition: string, now: Date) {
     }
   }
 
+  const bareMonthMatch = condition.match(/(?:^|[、。\s])(\d{1,2})月(?!\d{1,2}日)(?:の|で|に)?/);
+  
   const japaneseRangeMatch = condition.match(
     /(\d{4})?\s*年?\s*(\d{1,2})月(\d{1,2})日\s*([〜～\-–—]|から)\s*(?:(\d{4})?\s*年?\s*)?(?:(\d{1,2})月)?(\d{1,2})日?(?:\s*(?:まで|の間))?/,
   );
+
+  if (bareMonthMatch && !rangeStart && !japaneseRangeMatch) {
+    hasDateReference = true;
+    const targetMonth = Number(bareMonthMatch[1]);
+    
+    invalidDateRange = targetMonth < 1 || targetMonth > 12;
+    
+    if (!invalidDateRange) {
+      let year = currentYear;
+      let startDay = 1;
+      
+      if (targetMonth === currentMonth) {
+        startDay = currentDay;
+      } else if (targetMonth < currentMonth) {
+        year = currentYear + 1;
+      }
+      
+      const lastDayOfTargetMonth = new Date(year, targetMonth, 0);
+      const lastDayParts = tokyoDateParts(lastDayOfTargetMonth);
+      
+      rangeStart = tokyoOffsetDate(year, targetMonth, startDay, 0);
+      rangeEnd = tokyoOffsetDate(Number(lastDayParts.year), Number(lastDayParts.month), Number(lastDayParts.day), 24);
+      
+      const startParts = tokyoDateParts(rangeStart);
+      const endParts = tokyoDateParts(new Date(rangeEnd.getTime() - 1));
+      invalidDateRange =
+        Number(startParts.month) !== targetMonth ||
+        Number(endParts.month) !== targetMonth ||
+        rangeEnd <= rangeStart;
+    }
+  }
 
   if (japaneseRangeMatch && !rangeStart) {
     hasDateReference = true;

@@ -17,6 +17,10 @@ const CALENDAR_SCOPES = [
 ];
 const OAUTH_INTENT_KEY = "hidori_google_calendar_oauth_intent";
 
+function getManualDisconnectKey(userId: string | undefined) {
+  return userId ? `hidori_gcal_manual_disconnect_${userId}` : null;
+}
+
 export function CalendarConnection() {
   const { user } = useUser();
   const queryClient = useQueryClient();
@@ -34,29 +38,62 @@ export function CalendarConnection() {
     queryClient.invalidateQueries({ queryKey: getGetCalendarConnectionQueryKey() });
 
   useEffect(() => {
-    if (
-      !user ||
-      data?.connected ||
-      enable.isPending ||
-      sessionStorage.getItem(OAUTH_INTENT_KEY) !== "pending"
-    ) return;
+    if (!user || data?.connected || enable.isPending) return;
+    
     const account = user.externalAccounts.find((item) => item.provider === "google");
     const approvedScopes = new Set(account?.approvedScopes.split(" ") ?? []);
-    if (!CALENDAR_SCOPES.every((scope) => approvedScopes.has(scope))) return;
-    enable.mutate(undefined, {
-      onSuccess: () => {
-        sessionStorage.removeItem(OAUTH_INTENT_KEY);
-        refresh();
-        toast.success("Googleカレンダーを接続しました");
-      },
-    });
+    const hasAllScopes = CALENDAR_SCOPES.every((scope) => approvedScopes.has(scope));
+    
+    const oauthIntentPending = sessionStorage.getItem(OAUTH_INTENT_KEY) === "pending";
+    const manualDisconnectKey = getManualDisconnectKey(user.id);
+    const wasManuallyDisconnected = manualDisconnectKey ? localStorage.getItem(manualDisconnectKey) === "1" : false;
+    
+    if (oauthIntentPending && hasAllScopes) {
+      enable.mutate(undefined, {
+        onSuccess: () => {
+          sessionStorage.removeItem(OAUTH_INTENT_KEY);
+          if (manualDisconnectKey) localStorage.removeItem(manualDisconnectKey);
+          refresh();
+          toast.success("Googleカレンダーを接続しました");
+        },
+      });
+    } else if (hasAllScopes && !wasManuallyDisconnected && !oauthIntentPending) {
+      enable.mutate(undefined, {
+        onSuccess: () => {
+          if (manualDisconnectKey) localStorage.removeItem(manualDisconnectKey);
+          refresh();
+        },
+      });
+    }
   }, [data?.connected, enable, user]);
 
   const connect = async () => {
     if (!user) return;
     setIsAuthorizing(true);
+    
+    const manualDisconnectKey = getManualDisconnectKey(user.id);
+    if (manualDisconnectKey) {
+      localStorage.removeItem(manualDisconnectKey);
+    }
+    
     try {
       const account = user.externalAccounts.find((item) => item.provider === "google");
+      const approvedScopes = new Set(account?.approvedScopes.split(" ") ?? []);
+      const hasAllScopes = CALENDAR_SCOPES.every((scope) => approvedScopes.has(scope));
+      
+      if (hasAllScopes) {
+        try {
+          await enable.mutateAsync(undefined);
+          sessionStorage.removeItem(OAUTH_INTENT_KEY);
+          refresh();
+          toast.success("Googleカレンダーを接続しました");
+          setIsAuthorizing(false);
+          return;
+        } catch {
+          // Fall through to reauthorize
+        }
+      }
+      
       const authorized = account
         ? await account.reauthorize({
             additionalScopes: CALENDAR_SCOPES,
@@ -105,13 +142,19 @@ export function CalendarConnection() {
           variant="ghost"
           size="sm"
           disabled={disable.isPending}
-          onClick={() => disable.mutate(undefined, {
-            onSuccess: () => {
-              sessionStorage.removeItem(OAUTH_INTENT_KEY);
-              refresh();
-              toast.success("HI-DO-RIとGoogleカレンダーの連携を解除しました");
-            },
-          })}
+          onClick={() => {
+            const manualDisconnectKey = getManualDisconnectKey(user.id);
+            if (manualDisconnectKey) {
+              localStorage.setItem(manualDisconnectKey, "1");
+            }
+            disable.mutate(undefined, {
+              onSuccess: () => {
+                sessionStorage.removeItem(OAUTH_INTENT_KEY);
+                refresh();
+                toast.success("HI-DO-RIとGoogleカレンダーの連携を解除しました");
+              },
+            });
+          }}
         >
           <Unplug className="mr-2 h-4 w-4" />アプリ連携を解除
         </Button>

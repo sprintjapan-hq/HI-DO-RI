@@ -99,6 +99,50 @@ test("年なし単一日付: 今日は今年（従来の動作を維持）", () 
   assert.strictEqual(formatDateRange(result.rangeStart, result.rangeEnd), "2026/10/21-2026/10/21", "今年2026年として解釈");
 });
 
+test("月単位指定: 11月の平日 → 11月1日〜30日", () => {
+  const result = parseCondition("11月の平日", BASE_NOW);
+  assert.ok(result, "結果がnullではない");
+  assert.strictEqual(result.invalidDateRange, false, "有効な日付範囲");
+  assert.strictEqual(result.dayType, "weekday", "平日のみ");
+  assert.strictEqual(formatDateRange(result.rangeStart, result.rangeEnd), "2026/11/1-2026/11/30", "今年11月として解釈");
+});
+
+test("月単位指定: 12月で午後 → 12月1日〜31日", () => {
+  const result = parseCondition("12月で午後", BASE_NOW);
+  assert.ok(result, "結果がnullではない");
+  assert.strictEqual(result.invalidDateRange, false, "有効な日付範囲");
+  assert.strictEqual(formatDateRange(result.rangeStart, result.rangeEnd), "2026/12/1-2026/12/31", "今年12月として解釈");
+});
+
+test("月単位指定: 10月の平日 → 今月、今日から月末まで", () => {
+  const result = parseCondition("10月の平日", BASE_NOW);
+  assert.ok(result, "結果がnullではない");
+  assert.strictEqual(result.invalidDateRange, false, "有効な日付範囲");
+  assert.strictEqual(result.dayType, "weekday", "平日のみ");
+  assert.strictEqual(formatDateRange(result.rangeStart, result.rangeEnd), "2026/10/21-2026/10/31", "今年10月21日から31日まで");
+});
+
+test("月単位指定: 9月の午後 → 過去の月なので来年", () => {
+  const result = parseCondition("9月の午後", BASE_NOW);
+  assert.ok(result, "結果がnullではない");
+  assert.strictEqual(result.invalidDateRange, false, "有効な日付範囲");
+  assert.strictEqual(formatDateRange(result.rangeStart, result.rangeEnd), "2027/9/1-2027/9/30", "来年9月として解釈");
+});
+
+test("今月末まで → 今日から今月末", () => {
+  const result = parseCondition("今月末まで 午後", BASE_NOW);
+  assert.ok(result, "結果がnullではない");
+  assert.strictEqual(result.invalidDateRange, false, "有効な日付範囲");
+  assert.strictEqual(formatDateRange(result.rangeStart, result.rangeEnd), "2026/10/21-2026/10/31", "今月末まで");
+});
+
+test("来月末まで → 来月1日から来月末", () => {
+  const result = parseCondition("来月末まで 午後", BASE_NOW);
+  assert.ok(result, "結果がnullではない");
+  assert.strictEqual(result.invalidDateRange, false, "有効な日付範囲");
+  assert.strictEqual(formatDateRange(result.rangeStart, result.rangeEnd), "2026/11/1-2026/11/30", "来月末まで");
+});
+
 test("年なし単一日付: 未来の日付は今年（従来の動作を維持）", () => {
   const result = parseCondition("10/25", BASE_NOW);
   assert.ok(result, "結果がnullではない");
