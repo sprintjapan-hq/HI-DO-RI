@@ -10,6 +10,7 @@ import {
 } from "@workspace/db";
 import { and, eq, gt, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { logger } from "./logger";
+import { resolveCandidateTime } from "./candidate-label-time";
 
 export const GOOGLE_CALENDAR_TIME_ZONE = "Asia/Tokyo";
 export const GOOGLE_CALENDAR_RECONNECT_ERROR_CODE =
@@ -34,9 +35,15 @@ export async function removeCandidateCalendarEvents(
     position: number;
   }>,
 ): Promise<{ status: "ok" | "reconnect_required" | "unavailable" }> {
-  const candidatesWithTime = removedCandidates.filter(
-    (c) => c.startAt && c.endAt && c.endAt > c.startAt,
-  );
+  const [poll] = removedCandidates.length > 0 ? await db
+    .select({ shareId: pollsTable.shareId, title: pollsTable.title, createdAt: pollsTable.createdAt })
+    .from(pollsTable)
+    .where(eq(pollsTable.id, pollId))
+    .limit(1) : [];
+  const candidatesWithTime = removedCandidates.flatMap((candidate) => {
+    const time = poll ? resolveCandidateTime(candidate, poll.createdAt) : null;
+    return time ? [{ ...candidate, ...time }] : [];
+  });
 
   if (events.length === 0 && candidatesWithTime.length === 0) {
     return { status: "ok" };
@@ -70,12 +77,6 @@ export async function removeCandidateCalendarEvents(
   }
 
   if (candidatesWithTime.length > 0) {
-    const [poll] = await db
-      .select({ shareId: pollsTable.shareId, title: pollsTable.title })
-      .from(pollsTable)
-      .where(eq(pollsTable.id, pollId))
-      .limit(1);
-
     if (poll) {
       try {
         const allStartTimes = candidatesWithTime.map((c) => c.startAt!.getTime());
@@ -83,14 +84,18 @@ export async function removeCandidateCalendarEvents(
         const timeMin = new Date(Math.min(...allStartTimes) - 24 * 60 * 60 * 1000);
         const timeMax = new Date(Math.max(...allEndTimes) + 24 * 60 * 60 * 1000);
 
-        const response = await googleRequest(
-          access.token,
-          `/calendar/v3/calendars/primary/events?timeMin=${encodeURIComponent(timeMin.toISOString())}&timeMax=${encodeURIComponent(timeMax.toISOString())}&singleEvents=true`,
-          { method: "GET" },
-        );
+        let nextPageToken: string | undefined;
+        do {
+          const response = await googleRequest(
+            access.token,
+            `/calendar/v3/calendars/primary/events?timeMin=${encodeURIComponent(timeMin.toISOString())}&timeMax=${encodeURIComponent(timeMax.toISOString())}&singleEvents=true${nextPageToken ? `&pageToken=${encodeURIComponent(nextPageToken)}` : ""}`,
+            { method: "GET" },
+          );
 
-        if (response.ok) {
+          if (response.status === 401 || response.status === 403) return { status: "reconnect_required" };
+          if (!response.ok) return { status: "unavailable" };
           const data = (await response.json()) as {
+            nextPageToken?: string;
             items?: Array<{
               id?: string;
               summary?: string;
@@ -100,6 +105,7 @@ export async function removeCandidateCalendarEvents(
               extendedProperties?: { private?: Record<string, string> };
             }>;
           };
+          nextPageToken = data.nextPageToken;
 
           const expectedSummary = `[仮] ${poll.title}`;
           const shareUrlFragment = `/p/${poll.shareId}`;
@@ -158,12 +164,13 @@ export async function removeCandidateCalendarEvents(
               }
             }
           }
-        }
+        } while (nextPageToken);
       } catch (error) {
         logger.warn(
           { err: error, pollId },
           "Failed to query and clean up untracked tentative events during candidate deletion",
         );
+        return { status: "unavailable" };
       }
     }
   }

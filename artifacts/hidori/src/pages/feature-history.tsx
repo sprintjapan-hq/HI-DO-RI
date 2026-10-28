@@ -13,7 +13,7 @@ const releases: ReleaseCard[] = [
   {
     version: "v0.7",
     date: "2026年10月28日",
-    time: "16:30",
+    time: "18:00",
     title: "候補日の削除・出欠の変更とGoogleカレンダー仮予定の連動を強化",
     features: [
       "主催者がイベント編集画面から既存の候補日を削除できる機能を追加",

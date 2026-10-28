@@ -1,4 +1,4 @@
-import { before, after, test } from "node:test";
+import { before, after, afterEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -16,6 +16,10 @@ let google;
 let base;
 let deleteStatus = 204;
 const deletedEvents = [];
+let listStatus = 200;
+let listedEvents = [];
+let listPages = null;
+const listRequests = [];
 
 async function freePort() {
   const probe = net.createServer();
@@ -63,6 +67,11 @@ before(async () => {
     if (req.method === "DELETE") {
       deletedEvents.push(req.url);
       res.writeHead(deleteStatus).end();
+    } else if (req.method === "GET") {
+      listRequests.push(req.url);
+      res.writeHead(listStatus, { "Content-Type": "application/json" });
+      const pageToken = new URL(req.url, "http://localhost").searchParams.get("pageToken");
+      res.end(JSON.stringify(listPages ? listPages[pageToken ?? "first"] : { items: listedEvents }));
     } else {
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify(req.method === "POST" ? { id: JSON.parse(data).id } : { items: [] }));
@@ -88,6 +97,13 @@ before(async () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   throw new Error("Isolated API process did not start");
+});
+afterEach(() => {
+  listStatus = 200;
+  deleteStatus = 204;
+  listedEvents = [];
+  listPages = null;
+  listRequests.length = 0;
 });
 after(async () => {
   server?.kill();
@@ -159,4 +175,73 @@ test("calendar permission failure preserves data and returns reconnect code; ret
   assert.equal(deletedEvents.length - beforeCount, 1);
   const remaining = await client.query("SELECT candidate_id FROM poll_calendar_events WHERE poll_id = $1 ORDER BY candidate_id", [poll.id]);
   assert.deepEqual(remaining.rows.map((r) => r.candidate_id), [poll.candidates[0].id, poll.candidates[2].id]);
+});
+
+async function createLegacy(label) {
+  const { status, body } = await request("/polls", {
+    title: `ラベル候補の仮予定削除-${randomUUID()}`,
+    candidates: [label, "残す候補B", "残す候補C"],
+  });
+  assert.equal(status, 201);
+  createdIds.push(body.id);
+  const { rows } = await client.query(
+    "SELECT start_at, end_at FROM poll_candidates WHERE id = $1", [body.candidates[0].id],
+  );
+  assert.equal(rows[0].start_at, null);
+  assert.equal(rows[0].end_at, null);
+  return body;
+}
+function legacyEvent(poll, overrides = {}) {
+  return {
+    id: `legacy-${randomUUID()}`, summary: `[仮] ${poll.title}`,
+    start: { dateTime: "2026-11-02T14:00:00+09:00" },
+    end: { dateTime: "2026-11-02T16:00:00+09:00" },
+    ...overrides,
+  };
+}
+for (const label of ["2026/11/2(月) 14:00〜16:00", "11/2(月) 14:00-16:00"]) {
+  test(`null timestamps recover from label and delete only matching legacy tentative events: ${label}`, async () => {
+    const poll = await createLegacy(label);
+    // Anchor year independently of the machine's current year.
+    await client.query("UPDATE polls SET created_at = $1 WHERE id = $2", ["2026-10-27T04:16:50Z", poll.id]);
+    const matched = legacyEvent(poll);
+    listedEvents = [
+      matched,
+      legacyEvent(poll, { summary: poll.title, extendedProperties: { private: { hidoriKind: "confirmed" } } }),
+      legacyEvent(poll, { extendedProperties: { private: { hidoriKind: "tentative", hidoriShareId: "another-poll" } } }),
+      legacyEvent(poll, { description: "https://example.com/p/another-poll" }),
+      legacyEvent(poll, { start: { dateTime: "2026-11-02T15:00:00+09:00" } }),
+      legacyEvent(poll, { summary: "[仮] 別のイベント" }),
+    ];
+    const before = deletedEvents.length;
+    const edited = await edit(poll, { removedCandidateIds: [poll.candidates[0].id] });
+    assert.equal(edited.status, 200);
+    assert.equal(edited.body.candidates.length, 2);
+    assert.deepEqual(deletedEvents.slice(before), [`/calendar/v3/calendars/primary/events/${matched.id}?sendUpdates=none`]);
+    const query = new URL(listRequests[0], "http://localhost").searchParams;
+    assert.ok(new Date(query.get("timeMin")) < new Date(matched.start.dateTime));
+    assert.ok(new Date(query.get("timeMax")) > new Date(matched.end.dateTime));
+  });
+}
+for (const status of [401, 403, 500]) {
+  test(`legacy calendar listing HTTP ${status} preserves candidates instead of reporting deletion success`, async () => {
+    const poll = await createLegacy("2026/11/2(月) 14:00〜16:00");
+    listStatus = status;
+    const edited = await edit(poll, { removedCandidateIds: [poll.candidates[0].id] });
+    assert.equal(edited.status, status === 500 ? 502 : 409);
+    if (status !== 500) assert.equal(edited.body.code, "google_calendar_reconnect_required");
+    const reloaded = await request(`/polls/${poll.shareId}`, undefined, owner, "GET");
+    assert.equal(reloaded.body.candidates.length, 3);
+  });
+}
+test("legacy calendar matching follows pagination before completing deletion", async () => {
+  const poll = await createLegacy("2026/11/2(月) 14:00〜16:00");
+  const matched = legacyEvent(poll);
+  listPages = { first: { items: [], nextPageToken: "second-page" }, "second-page": { items: [matched] } };
+  const before = deletedEvents.length;
+  const edited = await edit(poll, { removedCandidateIds: [poll.candidates[0].id] });
+  assert.equal(edited.status, 200);
+  assert.equal(listRequests.length, 2);
+  assert.ok(listRequests[1].includes("pageToken=second-page"));
+  assert.deepEqual(deletedEvents.slice(before), [`/calendar/v3/calendars/primary/events/${matched.id}?sendUpdates=none`]);
 });
