@@ -23,14 +23,28 @@ export const CALENDAR_EVENTS_SCOPE =
 /** Remove external events before their candidate references are deleted. */
 export async function removeCandidateCalendarEvents(
   ownerUserId: string,
+  pollId: number,
   events: Array<{ googleEventId: string }>,
+  removedCandidates: Array<{
+    id: number;
+    pollId: number;
+    label: string;
+    startAt: Date | null;
+    endAt: Date | null;
+    position: number;
+  }>,
 ): Promise<{ status: "ok" | "reconnect_required" | "unavailable" }> {
-  if (events.length === 0) return { status: "ok" };
   const access = await getGoogleAccess(ownerUserId);
   if (access.status === "unavailable") return { status: "unavailable" };
   if (access.status !== "connected" || !access.scopes.includes(CALENDAR_EVENTS_SCOPE)) {
     return { status: "reconnect_required" };
   }
+
+  const trackedEventIds = new Set(events.map((e) => e.googleEventId));
+  const candidatesWithTime = removedCandidates.filter(
+    (c) => c.startAt && c.endAt && c.endAt > c.startAt,
+  );
+
   for (const event of events) {
     try {
       const response = await googleRequest(
@@ -44,6 +58,92 @@ export async function removeCandidateCalendarEvents(
       return { status: "unavailable" };
     }
   }
+
+  if (candidatesWithTime.length > 0) {
+    const [poll] = await db
+      .select({ shareId: pollsTable.shareId, title: pollsTable.title })
+      .from(pollsTable)
+      .where(eq(pollsTable.id, pollId))
+      .limit(1);
+
+    if (poll) {
+      try {
+        const allStartTimes = candidatesWithTime.map((c) => c.startAt!.getTime());
+        const allEndTimes = candidatesWithTime.map((c) => c.endAt!.getTime());
+        const timeMin = new Date(Math.min(...allStartTimes) - 24 * 60 * 60 * 1000);
+        const timeMax = new Date(Math.max(...allEndTimes) + 24 * 60 * 60 * 1000);
+
+        const response = await googleRequest(
+          access.token,
+          `/calendar/v3/calendars/primary/events?timeMin=${encodeURIComponent(timeMin.toISOString())}&timeMax=${encodeURIComponent(timeMax.toISOString())}&singleEvents=true`,
+          { method: "GET" },
+        );
+
+        if (response.ok) {
+          const data = (await response.json()) as {
+            items?: Array<{
+              id?: string;
+              summary?: string;
+              description?: string;
+              start?: { dateTime?: string };
+              end?: { dateTime?: string };
+              extendedProperties?: { private?: Record<string, string> };
+            }>;
+          };
+
+          const expectedSummary = `[仮] ${poll.title}`;
+          const shareUrlFragment = `/p/${poll.shareId}`;
+
+          for (const item of data.items ?? []) {
+            if (!item.id || !item.start?.dateTime || !item.end?.dateTime) continue;
+            if (trackedEventIds.has(item.id)) continue;
+
+            const matchesSummary = item.summary === expectedSummary;
+            const matchesShareId = item.extendedProperties?.private?.hidoriShareId === poll.shareId;
+            const matchesDescription = item.description?.includes(shareUrlFragment) ?? false;
+
+            if (!matchesSummary && !matchesShareId && !matchesDescription) continue;
+
+            const eventStart = new Date(item.start.dateTime).getTime();
+            const eventEnd = new Date(item.end.dateTime).getTime();
+
+            const matchingCandidate = candidatesWithTime.find(
+              (c) =>
+                c.startAt!.getTime() === eventStart && c.endAt!.getTime() === eventEnd,
+            );
+
+            if (matchingCandidate) {
+              try {
+                const deleteResponse = await googleRequest(
+                  access.token,
+                  `/calendar/v3/calendars/primary/events/${encodeURIComponent(item.id)}?sendUpdates=none`,
+                  { method: "DELETE" },
+                );
+                if (deleteResponse.status === 401 || deleteResponse.status === 403) {
+                  return { status: "reconnect_required" };
+                }
+                if (
+                  !deleteResponse.ok &&
+                  deleteResponse.status !== 404 &&
+                  deleteResponse.status !== 410
+                ) {
+                  return { status: "unavailable" };
+                }
+              } catch {
+                return { status: "unavailable" };
+              }
+            }
+          }
+        }
+      } catch (error) {
+        logger.warn(
+          { err: error, pollId },
+          "Failed to query and clean up untracked tentative events during candidate deletion",
+        );
+      }
+    }
+  }
+
   return { status: "ok" };
 }
 const REQUIRED_SCOPES = [
@@ -359,14 +459,16 @@ export async function createTentativePollEvents(input: {
       };
       
       const expectedSummary = `[仮] ${poll.title}`;
+      const shareUrlFragment = `/p/${poll.shareId}`;
       
       for (const item of data.items ?? []) {
         if (!item.id || !item.start?.dateTime || !item.end?.dateTime) continue;
         
         const matchesSummary = item.summary === expectedSummary;
         const matchesShareId = item.extendedProperties?.private?.hidoriShareId === poll.shareId;
+        const matchesDescription = item.description?.includes(shareUrlFragment) ?? false;
         
-        if (!matchesSummary && !matchesShareId) continue;
+        if (!matchesSummary && !matchesShareId && !matchesDescription) continue;
         
         const eventStart = new Date(item.start.dateTime).getTime();
         const eventEnd = new Date(item.end.dateTime).getTime();
@@ -547,6 +649,87 @@ export async function finalizePollCalendarEvents(input: {
       `${deletionFailures.length} tentative Google Calendar events could not be deleted`,
       deletionFailuresAreRetryable,
       deletionFailureNeedsReconnect,
+    );
+  }
+
+  try {
+    const allCandidates = await db
+      .select()
+      .from(pollCandidatesTable)
+      .where(eq(pollCandidatesTable.pollId, poll.id));
+
+    const candidatesWithTime = allCandidates.filter(
+      (c) => c.startAt && c.endAt && c.endAt > c.startAt,
+    );
+
+    if (candidatesWithTime.length > 0) {
+      const allStartTimes = candidatesWithTime.map((c) => c.startAt!.getTime());
+      const allEndTimes = candidatesWithTime.map((c) => c.endAt!.getTime());
+      const timeMin = new Date(Math.min(...allStartTimes) - 24 * 60 * 60 * 1000);
+      const timeMax = new Date(Math.max(...allEndTimes) + 24 * 60 * 60 * 1000);
+
+      const response = await googleRequest(
+        access.token,
+        `/calendar/v3/calendars/primary/events?timeMin=${encodeURIComponent(timeMin.toISOString())}&timeMax=${encodeURIComponent(timeMax.toISOString())}&singleEvents=true`,
+        { method: "GET" },
+      );
+
+      if (response.ok) {
+        const data = (await response.json()) as {
+          items?: Array<{
+            id?: string;
+            summary?: string;
+            description?: string;
+            start?: { dateTime?: string };
+            end?: { dateTime?: string };
+            extendedProperties?: { private?: Record<string, string> };
+          }>;
+        };
+
+        const expectedSummary = `[仮] ${poll.title}`;
+        const shareUrlFragment = `/p/${poll.shareId}`;
+        const deletedEventIds = new Set(tentativeEvents.map((e) => e.googleEventId));
+
+        for (const item of data.items ?? []) {
+          if (!item.id) continue;
+          if (deletedEventIds.has(item.id)) continue;
+
+          const matchesSummary = item.summary === expectedSummary;
+          const matchesShareId =
+            item.extendedProperties?.private?.hidoriShareId === poll.shareId;
+          const matchesDescription = item.description?.includes(shareUrlFragment) ?? false;
+
+          if (matchesSummary || matchesShareId || matchesDescription) {
+            try {
+              const deleteResponse = await googleRequest(
+                access.token,
+                `/calendar/v3/calendars/primary/events/${encodeURIComponent(item.id)}?sendUpdates=none`,
+                { method: "DELETE" },
+              );
+              if (
+                deleteResponse.ok ||
+                deleteResponse.status === 404 ||
+                deleteResponse.status === 410
+              ) {
+                logger.info(
+                  { pollId: poll.id, googleEventId: item.id },
+                  "Cleaned up untracked tentative event during poll finalization",
+                );
+              }
+            } catch (error) {
+              logger.warn(
+                { err: error, pollId: poll.id, googleEventId: item.id },
+                "Failed to delete untracked tentative event during finalization",
+              );
+            }
+          }
+        }
+      }
+    }
+  } catch (error) {
+    logger.warn(
+      { err: error, pollId: poll.id },
+      "Failed to clean up untracked tentative events during poll finalization",
     );
   }
 

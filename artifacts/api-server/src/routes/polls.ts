@@ -367,13 +367,21 @@ router.patch("/polls/:shareId", async (req, res): Promise<void> => {
       return { status: 400, error: "主催者のお名前と、すべての候補日の出欠を入力してください。" } as const;
     }
     if (removedIds.size > 0) {
-      const events = await tx.select({ googleEventId: pollCalendarEventsTable.googleEventId })
-        .from(pollCalendarEventsTable).where(and(
-          eq(pollCalendarEventsTable.pollId, poll.id),
-          eq(pollCalendarEventsTable.kind, "tentative"),
-          inArray(pollCalendarEventsTable.candidateId, [...removedIds]),
-        ));
-      const cleanup = await removeCandidateCalendarEvents(userId, events);
+      const [events, removedCandidates] = await Promise.all([
+        tx.select({ googleEventId: pollCalendarEventsTable.googleEventId })
+          .from(pollCalendarEventsTable).where(and(
+            eq(pollCalendarEventsTable.pollId, poll.id),
+            eq(pollCalendarEventsTable.kind, "tentative"),
+            inArray(pollCalendarEventsTable.candidateId, [...removedIds]),
+          )),
+        tx.select()
+          .from(pollCandidatesTable)
+          .where(and(
+            eq(pollCandidatesTable.pollId, poll.id),
+            inArray(pollCandidatesTable.id, [...removedIds]),
+          )),
+      ]);
+      const cleanup = await removeCandidateCalendarEvents(userId, poll.id, events, removedCandidates);
       if (cleanup.status === "reconnect_required") {
         return {
           status: 409,
@@ -404,14 +412,15 @@ router.patch("/polls/:shareId", async (req, res): Promise<void> => {
       .set({ title, note })
       .where(eq(pollsTable.id, poll.id));
 
+    let insertedCandidates: Array<{ id: number; label: string; position: number }> = [];
     if (newCandidates.length > 0) {
-      await tx.insert(pollCandidatesTable).values(
+      insertedCandidates = await tx.insert(pollCandidatesTable).values(
         newCandidates.map((label, index) => ({
           pollId: poll.id,
           label,
           position: retainedIndices.length + index,
         })),
-      );
+      ).returning();
     }
 
     if (organizerResponse) {
@@ -430,11 +439,34 @@ router.patch("/polls/:shareId", async (req, res): Promise<void> => {
       });
     }
 
-    return { status: 200 } as const;
+    return { status: 200, insertedCandidates } as const;
   });
   if (result.status !== 200) {
     res.status(result.status).json({ error: result.error, ...("code" in result ? { code: result.code } : {}) });
     return;
+  }
+
+  if (result.insertedCandidates.length > 0) {
+    const shareUrl = `${req.protocol}://${req.get("host")}/p/${encodeURIComponent(params.data.shareId)}`;
+    try {
+      const [poll] = await db
+        .select({ id: pollsTable.id, shareId: pollsTable.shareId, title: pollsTable.title })
+        .from(pollsTable)
+        .where(eq(pollsTable.shareId, params.data.shareId))
+        .limit(1);
+      if (poll) {
+        await createTentativePollEvents({
+          pollId: poll.id,
+          ownerUserId: userId,
+          shareUrl,
+        });
+      }
+    } catch (error) {
+      req.log.error(
+        { err: error, shareId: params.data.shareId },
+        "Tentative Google Calendar events for new candidates could not be created",
+      );
+    }
   }
 
   const updated = await buildPoll(params.data.shareId, userId);
