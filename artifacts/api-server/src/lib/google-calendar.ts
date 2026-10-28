@@ -34,16 +34,26 @@ export async function removeCandidateCalendarEvents(
     position: number;
   }>,
 ): Promise<{ status: "ok" | "reconnect_required" | "unavailable" }> {
+  const candidatesWithTime = removedCandidates.filter(
+    (c) => c.startAt && c.endAt && c.endAt > c.startAt,
+  );
+
+  if (events.length === 0 && candidatesWithTime.length === 0) {
+    return { status: "ok" };
+  }
+
   const access = await getGoogleAccess(ownerUserId);
   if (access.status === "unavailable") return { status: "unavailable" };
+  
+  if (events.length === 0 && access.status === "disconnected") {
+    return { status: "ok" };
+  }
+  
   if (access.status !== "connected" || !access.scopes.includes(CALENDAR_EVENTS_SCOPE)) {
     return { status: "reconnect_required" };
   }
 
   const trackedEventIds = new Set(events.map((e) => e.googleEventId));
-  const candidatesWithTime = removedCandidates.filter(
-    (c) => c.startAt && c.endAt && c.endAt > c.startAt,
-  );
 
   for (const event of events) {
     try {
@@ -98,9 +108,23 @@ export async function removeCandidateCalendarEvents(
             if (!item.id || !item.start?.dateTime || !item.end?.dateTime) continue;
             if (trackedEventIds.has(item.id)) continue;
 
+            const hidoriKind = item.extendedProperties?.private?.hidoriKind;
+            if (hidoriKind === "confirmed") continue;
+
+            const itemShareId = item.extendedProperties?.private?.hidoriShareId;
+            if (itemShareId && itemShareId !== poll.shareId) continue;
+
+            const itemDescription = item.description ?? "";
+            if (itemDescription.includes("/p/") && !itemDescription.includes(shareUrlFragment)) {
+              continue;
+            }
+
             const matchesSummary = item.summary === expectedSummary;
-            const matchesShareId = item.extendedProperties?.private?.hidoriShareId === poll.shareId;
-            const matchesDescription = item.description?.includes(shareUrlFragment) ?? false;
+            const matchesShareId = itemShareId === poll.shareId;
+            const matchesDescription = itemDescription.includes(shareUrlFragment);
+
+            const isTentative = hidoriKind === "tentative" || item.summary?.startsWith("[仮] ");
+            if (!isTentative) continue;
 
             if (!matchesSummary && !matchesShareId && !matchesDescription) continue;
 
@@ -464,10 +488,24 @@ export async function createTentativePollEvents(input: {
       for (const item of data.items ?? []) {
         if (!item.id || !item.start?.dateTime || !item.end?.dateTime) continue;
         
+        const hidoriKind = item.extendedProperties?.private?.hidoriKind;
+        if (hidoriKind === "confirmed") continue;
+
+        const itemShareId = item.extendedProperties?.private?.hidoriShareId;
+        if (itemShareId && itemShareId !== poll.shareId) continue;
+
+        const itemDescription = item.description ?? "";
+        if (itemDescription.includes("/p/") && !itemDescription.includes(shareUrlFragment)) {
+          continue;
+        }
+
         const matchesSummary = item.summary === expectedSummary;
-        const matchesShareId = item.extendedProperties?.private?.hidoriShareId === poll.shareId;
-        const matchesDescription = item.description?.includes(shareUrlFragment) ?? false;
-        
+        const matchesShareId = itemShareId === poll.shareId;
+        const matchesDescription = itemDescription.includes(shareUrlFragment);
+
+        const isTentative = hidoriKind === "tentative" || item.summary?.startsWith("[仮] ");
+        if (!isTentative) continue;
+
         if (!matchesSummary && !matchesShareId && !matchesDescription) continue;
         
         const eventStart = new Date(item.start.dateTime).getTime();
@@ -694,10 +732,23 @@ export async function finalizePollCalendarEvents(input: {
           if (!item.id) continue;
           if (deletedEventIds.has(item.id)) continue;
 
+          const hidoriKind = item.extendedProperties?.private?.hidoriKind;
+          if (hidoriKind === "confirmed") continue;
+
+          const itemShareId = item.extendedProperties?.private?.hidoriShareId;
+          if (itemShareId && itemShareId !== poll.shareId) continue;
+
+          const itemDescription = item.description ?? "";
+          if (itemDescription.includes("/p/") && !itemDescription.includes(shareUrlFragment)) {
+            continue;
+          }
+
           const matchesSummary = item.summary === expectedSummary;
-          const matchesShareId =
-            item.extendedProperties?.private?.hidoriShareId === poll.shareId;
-          const matchesDescription = item.description?.includes(shareUrlFragment) ?? false;
+          const matchesShareId = itemShareId === poll.shareId;
+          const matchesDescription = itemDescription.includes(shareUrlFragment);
+
+          const isTentative = hidoriKind === "tentative" || item.summary?.startsWith("[仮] ");
+          if (!isTentative) continue;
 
           if (matchesSummary || matchesShareId || matchesDescription) {
             try {
