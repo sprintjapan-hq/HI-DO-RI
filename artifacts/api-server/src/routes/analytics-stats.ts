@@ -1,7 +1,12 @@
 import { Router, type IRouter, type Response } from "express";
 import { getAuth } from "@clerk/express";
 import { db, analyticsEventsTable } from "@workspace/db";
-import { sql, and, ne, isNotNull, or, isNull } from "drizzle-orm";
+import { sql, and, ne, or, isNull, gte, lt } from "drizzle-orm";
+import {
+  jstDayEndExclusive,
+  jstDayStart,
+  parseAnalyticsDateQuery,
+} from "../lib/analytics-date-range";
 
 const router: IRouter = Router();
 
@@ -41,15 +46,30 @@ function requireOperator(req: Parameters<typeof getAuth>[0], res: Response) {
 router.get("/analytics/stats", async (req, res): Promise<void> => {
   if (!requireOperator(req, res)) return;
 
+  const range = parseAnalyticsDateQuery(req.query.start, req.query.end);
+  if (!range.ok) {
+    res.status(400).json({ error: range.error });
+    return;
+  }
+
   try {
     const excludeVerify = req.query.excludeVerify !== "false";
-    
-    const whereClause = excludeVerify
-      ? or(
-          isNull(analyticsEventsTable.utmCampaign),
-          ne(analyticsEventsTable.utmCampaign, "hd-verify")
-        )
-      : undefined;
+    const filters = [
+      excludeVerify
+        ? or(
+            isNull(analyticsEventsTable.utmCampaign),
+            ne(analyticsEventsTable.utmCampaign, "hd-verify"),
+          )
+        : undefined,
+      range.start
+        ? gte(analyticsEventsTable.createdAt, jstDayStart(range.start))
+        : undefined,
+      range.end
+        ? lt(analyticsEventsTable.createdAt, jstDayEndExclusive(range.end))
+        : undefined,
+    ].filter((clause) => clause !== undefined);
+
+    const whereClause = filters.length > 0 ? and(...filters) : undefined;
 
     const eventCounts = await db
       .select({
@@ -65,7 +85,7 @@ router.get("/analytics/stats", async (req, res): Promise<void> => {
         analyticsEventsTable.event,
         analyticsEventsTable.utmSource,
         analyticsEventsTable.utmCampaign,
-        analyticsEventsTable.utmContent
+        analyticsEventsTable.utmContent,
       )
       .orderBy(sql`count(*) desc`);
 
