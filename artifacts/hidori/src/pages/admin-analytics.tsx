@@ -4,6 +4,9 @@ import { Loader2, AlertCircle, BarChart3, TrendingUp } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { analyticsRangeLabel, previousJstCalendarDay } from "@/lib/jst-calendar";
 
 interface EventCount {
   event: string;
@@ -30,35 +33,61 @@ export default function AdminAnalytics() {
   const [error, setError] = useState<string | null>(null);
   const [stats, setStats] = useState<StatsResponse | null>(null);
   const [excludeVerify, setExcludeVerify] = useState(true);
+  const [start, setStart] = useState("");
+  const [end, setEnd] = useState("");
 
   useEffect(() => {
+    const controller = new AbortController();
+
     async function fetchStats() {
       try {
         setLoading(true);
-        const response = await fetch(`/api/analytics/stats?excludeVerify=${excludeVerify}`);
-        
+        const params = new URLSearchParams();
+        params.set("excludeVerify", String(excludeVerify));
+        if (start) params.set("start", start);
+        if (end) params.set("end", end);
+        const response = await fetch(`/api/analytics/stats?${params.toString()}`, {
+          signal: controller.signal,
+        });
+        if (controller.signal.aborted) return;
+
         if (response.status === 401 || response.status === 403) {
           setError("アクセス権限がありません");
           return;
         }
-        
+
+        if (response.status === 400) {
+          const data = await response.json().catch(() => null);
+          setError(typeof data?.error === "string" ? data.error : "日付の指定が正しくありません");
+          return;
+        }
+
         if (!response.ok) {
           setError("データの取得に失敗しました");
           return;
         }
-        
+
         const data = await response.json();
+        if (controller.signal.aborted) return;
         setStats(data);
         setError(null);
       } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
         setError("通信エラーが発生しました");
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) setLoading(false);
       }
     }
-    
-    fetchStats();
-  }, [excludeVerify]);
+
+    void fetchStats();
+    return () => controller.abort();
+  }, [excludeVerify, start, end]);
+
+  function applyYesterday() {
+    const day = previousJstCalendarDay();
+    setStart(day);
+    setEnd(day);
+  }
 
   if (error === "アクセス権限がありません") {
     return (
@@ -123,15 +152,47 @@ export default function AdminAnalytics() {
           )}
         </header>
 
-        <div className="flex items-center space-x-2">
-          <Switch
-            id="exclude-verify"
-            checked={excludeVerify}
-            onCheckedChange={setExcludeVerify}
-          />
-          <Label htmlFor="exclude-verify" className="text-sm cursor-pointer">
-            検証用キャンペーン（hd-verify）を除外
-          </Label>
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="analytics-start">開始日</Label>
+                <Input
+                  id="analytics-start"
+                  type="date"
+                  value={start}
+                  onChange={(event) => setStart(event.target.value)}
+                  className="w-44"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="analytics-end">終了日</Label>
+                <Input
+                  id="analytics-end"
+                  type="date"
+                  value={end}
+                  onChange={(event) => setEnd(event.target.value)}
+                  className="w-44"
+                />
+              </div>
+              <Button type="button" variant="outline" onClick={applyYesterday}>
+                昨日
+              </Button>
+            </div>
+            <div className="flex items-center space-x-2 lg:pb-2">
+              <Switch
+                id="exclude-verify"
+                checked={excludeVerify}
+                onCheckedChange={setExcludeVerify}
+              />
+              <Label htmlFor="exclude-verify" className="text-sm cursor-pointer">
+                検証用キャンペーン（hd-verify）を除外
+              </Label>
+            </div>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            表示中の範囲: {analyticsRangeLabel(start, end)}
+          </p>
         </div>
 
         {loading && (
