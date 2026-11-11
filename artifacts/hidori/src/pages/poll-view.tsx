@@ -20,10 +20,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Loader2, Copy, Check, Users, Calendar, ArrowRight, LockKeyhole, Pencil } from "lucide-react";
+import { Loader2, Copy, Check, Users, Calendar, Download, ArrowRight, LockKeyhole, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { formatDateTime } from "@/lib/events";
+import { buildParticipantCalendarLinks } from "@/lib/calendar-links";
 import { needsGoogleCalendarReconnect } from "@/lib/google-calendar-error";
 import { CalendarConnection } from "@/components/calendar-connection";
 
@@ -34,6 +35,18 @@ const responseSchema = z.object({
 });
 
 type ResponseFormValues = z.infer<typeof responseSchema>;
+
+function downloadTextFile(filename: string, contents: string, mimeType: string) {
+  const blob = new Blob([contents], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 
 const AnswerSymbol = ({ answer }: { answer: string }) => {
   if (answer === "yes") return <span className="text-primary font-bold text-lg leading-none">○</span>;
@@ -292,6 +305,17 @@ export default function PollView() {
   const confirmedCandidate = poll.candidates.find(
     (candidate) => candidate.id === poll.confirmedCandidateId,
   );
+  const participantCalendar = confirmedCandidate
+    ? buildParticipantCalendarLinks({
+        shareId: poll.shareId,
+        title: poll.title,
+        shareUrl,
+        label: confirmedCandidate.label,
+        start: confirmedCandidate.start,
+        end: confirmedCandidate.end,
+        referenceDate: poll.createdAt,
+      })
+    : null;
 
   return (
     <Layout>
@@ -391,7 +415,7 @@ export default function PollView() {
                   {confirmedCandidate.label}
                 </h2>
                 <p className="text-sm text-muted-foreground mt-2">回答受付は終了しています。</p>
-                <div className="mt-4">
+                <div className="mt-4 flex flex-col items-start gap-2 sm:flex-row sm:flex-wrap">
                   <Button 
                     onClick={copyConfirmedText} 
                     variant="outline" 
@@ -400,6 +424,36 @@ export default function PollView() {
                     {copiedUrl === "confirmed" ? <Check className="h-4 w-4 mr-2" /> : <Copy className="h-4 w-4 mr-2" />}
                     {copiedUrl === "confirmed" ? "コピーしました" : "確定日時をコピー"}
                   </Button>
+                  {participantCalendar && (
+                    <>
+                      <Button variant="outline" size="sm" className="h-auto whitespace-normal" asChild>
+                        <a
+                          href={participantCalendar.googleUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          data-testid="link-add-google-calendar"
+                        >
+                          <Calendar className="mr-2 h-4 w-4 shrink-0" />
+                          Googleカレンダーに追加
+                        </a>
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-auto whitespace-normal"
+                        data-testid="button-download-ics"
+                        onClick={() => downloadTextFile(
+                          participantCalendar.filename,
+                          participantCalendar.ics,
+                          "text/calendar;charset=utf-8",
+                        )}
+                      >
+                        <Download className="mr-2 h-4 w-4 shrink-0" />
+                        .icsをダウンロード（iPhone・Outlook）
+                      </Button>
+                    </>
+                  )}
                 </div>
                 {isAdmin && confirmedCandidate.start && confirmedCandidate.end && (
                   <div className="mt-4 border-t border-primary/20 pt-4">
