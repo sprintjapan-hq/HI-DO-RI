@@ -174,6 +174,32 @@ describe("participant calendar links", () => {
     assert.equal(first.filename.includes("打ち合わせ"), false);
   });
 
+  test("v1.0: a manually typed start-only label (no stored instants) gets a 60 minute event", () => {
+    const links = buildParticipantCalendarLinks(timedInput({
+      start: null,
+      end: null,
+      label: "9/24(水) 19:00",
+      referenceDate: "2026-11-14T06:00:00.000Z",
+    }));
+    assert.ok(links);
+    assert.equal(
+      new URL(links.googleUrl).searchParams.get("dates"),
+      "20260924T100000Z/20260924T110000Z",
+    );
+    assert.match(unfoldIcs(links.ics), /DTSTART:20260924T100000Z\r\nDTEND:20260924T110000Z\r\n/);
+    const full = buildParticipantCalendarLinks(timedInput({
+      start: null,
+      end: null,
+      label: "2026/9/24(水) 19:00",
+    }));
+    assert.equal(new URL(full.googleUrl).searchParams.get("dates"), "20260924T100000Z/20260924T110000Z");
+    assert.equal(buildParticipantCalendarLinks(timedInput({
+      start: null,
+      end: null,
+      label: "9/24(水) 25:00",
+    })), null);
+  });
+
   test("returns nothing when a confirmed label has no resolvable time", () => {
     assert.equal(buildParticipantCalendarLinks(timedInput({
       start: null,
