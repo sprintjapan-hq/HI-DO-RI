@@ -12,8 +12,8 @@ import {
 const releases: ReleaseCard[] = [
   {
     version: "v1.0",
-    date: "2026年11月12日",
-    time: "21:32",
+    date: "2026年11月14日",
+    time: "16:20",
     title: "確定した日時を参加者が自分のカレンダーに追加できるようにした",
     features: [
       "確定後の共有ページから、HI-DO-RIにログインせずにGoogleカレンダーへ予定を追加できる",
