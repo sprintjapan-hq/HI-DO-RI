@@ -4,7 +4,8 @@
  * Polls store candidate instants (`start` / `end`) and a display label.
  * There is no all-day flag and no stored slot duration. Date-only values
  * (`YYYY-MM-DD`) are treated as all-day. A missing end falls back to the
- * label's end, then to `durationMinutes`, then to 60 minutes.
+ * label's end, then to `durationMinutes`, then to 60 minutes. A label with a
+ * start time only (the default "9/24(水) 19:00" format) is treated as 60 minutes.
  */
 
 const DEFAULT_DURATION_MINUTES = 60;
@@ -126,13 +127,17 @@ function resolveTimed(input: ParticipantCalendarInput): { allDay: false; start: 
 /** Tokyo wall time, matching the server label resolver. Yearless labels use the reference year. */
 function parseCandidateLabelTime(label: string, referenceDate: Date) {
   const match = label.normalize("NFKC").trim().match(
-    /^(?:(\d{4})\/)?(\d{1,2})\/(\d{1,2})(?:\([^)]*\))?\s+(\d{1,2}):(\d{2})\s*[〜～~\-–—]\s*(\d{1,2}):(\d{2})$/,
+    /^(?:(\d{4})\/)?(\d{1,2})\/(\d{1,2})(?:\([^)]*\))?\s+(\d{1,2}):(\d{2})(?:\s*[〜～~\-–—]\s*(\d{1,2}):(\d{2}))?$/,
   );
   if (!match || !Number.isFinite(referenceDate.getTime())) return null;
   const year = match[1]
     ? Number(match[1])
     : Number(new Intl.DateTimeFormat("en", { timeZone: TIME_ZONE, year: "numeric" }).format(referenceDate));
-  const [month, day, startHour, startMinute, endHour, endMinute] = match.slice(2).map(Number);
+  const [month, day, startHour, startMinute] = match.slice(2, 6).map(Number);
+  // The end time is optional: the default "9/24(水) 19:00" label has only a start.
+  const hasEnd = match[6] !== undefined && match[7] !== undefined;
+  const endHour = hasEnd ? Number(match[6]) : 0;
+  const endMinute = hasEnd ? Number(match[7]) : 0;
   if (
     year < 1000 ||
     month < 1 ||
@@ -155,8 +160,9 @@ function parseCandidateLabelTime(label: string, referenceDate: Date) {
     return null;
   }
   const startAt = new Date(Date.UTC(year, month - 1, day, startHour - 9, startMinute));
+  if (!hasEnd) return { startAt, endAt: null as Date | null };
   const endAt = new Date(Date.UTC(year, month - 1, day, endHour - 9, endMinute));
-  return endAt > startAt ? { startAt, endAt } : null;
+  return endAt > startAt ? { startAt, endAt: endAt as Date | null } : null;
 }
 
 function renderIcs(input: {
