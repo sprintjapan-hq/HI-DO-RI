@@ -415,6 +415,25 @@ export default function PollView() {
                   {confirmedCandidate.label}
                 </h2>
                 <p className="text-sm text-muted-foreground mt-2">回答受付は終了しています。</p>
+                {(() => {
+                  const confirmedCandidateIndex = poll.candidates.findIndex(c => c.id === poll.confirmedCandidateId);
+                  if (confirmedCandidateIndex === -1) return null;
+                  const yesResponses = poll.responses.filter(r => r.answers[confirmedCandidateIndex] === "yes");
+                  const maybeCount = poll.responses.filter(r => r.answers[confirmedCandidateIndex] === "maybe").length;
+                  const noCount = poll.responses.filter(r => r.answers[confirmedCandidateIndex] === "no").length;
+                  return poll.responses.length === 0 ? (
+                    <p className="text-sm text-muted-foreground mt-3">回答はありません</p>
+                  ) : (
+                    <div className="mt-3 text-sm text-foreground/80">
+                      <p className="font-medium">○ {yesResponses.length}人・△ {maybeCount}人・× {noCount}人</p>
+                      {yesResponses.length > 0 && (
+                        <p className="mt-1 text-muted-foreground">
+                          参加予定: {yesResponses.map(r => r.name).join("、")}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()}
                 <div className="mt-4 flex flex-col items-start gap-2 sm:flex-row sm:flex-wrap">
                   <Button 
                     onClick={copyConfirmedText} 
@@ -507,8 +526,6 @@ export default function PollView() {
         )}
 
         {/* Matrix Section */}
-        {!poll.isClosed && (
-        <>
         <div className="bg-card rounded-lg border border-border/80 shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm text-left whitespace-nowrap">
@@ -520,15 +537,22 @@ export default function PollView() {
                       参加者
                     </div>
                   </th>
-                  {poll.candidates.map(c => (
+                  {poll.candidates.filter(c => !poll.isClosed || c.id === poll.confirmedCandidateId).map(c => {
+                    const isConfirmed = poll.confirmedCandidateId === c.id;
+                    return (
                     <th key={c.id} className="p-4 font-medium text-center min-w-[100px] border-l border-border/40">
                       <div className="flex flex-col items-center justify-center text-foreground">
                         {c.label.split(' ').map((part, i) => (
                           <span key={i}>{part}</span>
                         ))}
+                        {isConfirmed && poll.isClosed && (
+                          <span className="mt-1.5 inline-flex items-center rounded-full bg-primary px-2 py-0.5 text-xs font-bold text-primary-foreground">
+                            確定
+                          </span>
+                        )}
                       </div>
                     </th>
-                  ))}
+                  )})}
                 </tr>
               </thead>
               <tbody>
@@ -539,7 +563,7 @@ export default function PollView() {
                       {poll.responses.length}人 回答済
                     </span>
                   </td>
-                  {poll.candidates.map(c => (
+                  {poll.candidates.filter(c => !poll.isClosed || c.id === poll.confirmedCandidateId).map(c => (
                     <td key={c.id} className="p-4 text-center border-l border-border/40">
                       <div className="flex flex-col items-center gap-1">
                         <span className={cn(
@@ -581,8 +605,9 @@ export default function PollView() {
                         )}
                       </div>
                     </td>
-                    {poll.candidates.map((c, i) => {
-                      const ans = r.answers[i];
+                    {poll.candidates.filter(c => !poll.isClosed || c.id === poll.confirmedCandidateId).map((c, displayIndex) => {
+                      const originalIndex = poll.candidates.findIndex(candidate => candidate.id === c.id);
+                      const ans = r.answers[originalIndex];
                       return (
                         <td key={c.id} className="p-4 text-center border-l border-border/40 align-middle">
                           <AnswerSymbol answer={ans} />
@@ -594,7 +619,7 @@ export default function PollView() {
 
                 {poll.responses.length === 0 && (
                   <tr>
-                    <td colSpan={poll.candidates.length + 1} className="p-12 text-center text-muted-foreground/60 font-medium">
+                    <td colSpan={(poll.isClosed ? 1 : poll.candidates.length) + 1} className="p-12 text-center text-muted-foreground/60 font-medium">
                       まだ回答がありません
                     </td>
                   </tr>
@@ -605,6 +630,7 @@ export default function PollView() {
         </div>
 
         {/* Input Form Section */}
+        {!poll.isClosed && (
         <div className="bg-card rounded-lg border border-border/80 shadow-sm overflow-hidden mt-8">
           <div className="p-6 border-b border-border/40 bg-muted/10">
             <h2 ref={responseHeadingRef} tabIndex={-1} className="text-lg font-serif font-bold flex items-center gap-2 outline-none">
@@ -716,6 +742,7 @@ export default function PollView() {
             </div>
           </form>
         </div>
+        )}
 
         {isAdmin && !poll.isClosed && (
           <section className="mt-8 overflow-hidden rounded-lg border border-primary/25 bg-card shadow-sm">
@@ -760,8 +787,6 @@ export default function PollView() {
               ))}
             </div>
           </section>
-        )}
-        </>
         )}
       </div>
     </Layout>
