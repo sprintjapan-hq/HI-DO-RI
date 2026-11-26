@@ -154,6 +154,7 @@ router.post("/polls", async (req, res): Promise<void> => {
 
   const shareId = randomBytes(6).toString("base64url");
   const adminKey = randomBytes(24).toString("base64url");
+  const now = new Date();
   const createdPoll = await db.transaction(async (tx) => {
     const [poll] = await tx
       .insert(pollsTable)
@@ -169,11 +170,13 @@ router.post("/polls", async (req, res): Promise<void> => {
     await tx.insert(pollCandidatesTable).values(
       candidates.map((label, position) => {
         const slot = candidateSlots.get(label);
+        // If candidateSlots doesn't have this label, try to parse it from the label itself
+        const time = slot || resolveCandidateTimeRange({ label, startAt: null, endAt: null }, now);
         return {
           pollId: poll.id,
           label,
-          startAt: slot?.start ?? null,
-          endAt: slot?.end ?? null,
+          startAt: time ? ('start' in time ? time.start : time.startAt) : null,
+          endAt: time ? ('end' in time ? time.end : time.endAt) : null,
           position,
         };
       }),
