@@ -1,20 +1,10 @@
 import { test } from "node:test";
-import assert from "node:assert/strict";
-import { parseCondition, tokyoOffsetDate } from "../src/routes/condition-parser.ts";
-
-/**
- * condition-parser.ts 年推論バグ修正のテスト
- * 
- * 基準日: 2026年10月21日 (火)
- * 
- * バグ症状:
- * 年なし期間（例: 10/20-10/25）で、開始日が基準日より前だと、
- * 終わりの日がまだ未来なのに、まるごと翌年として扱われていた。
- */
+import assert from "node:assert";
+import { parseCondition, generateCandidateSlots } from "../src/routes/condition-parser";
 
 const TIME_ZONE = "Asia/Tokyo";
 
-function tokyoDateParts(date) {
+function tokyoDateParts(date: Date) {
   const parts = new Intl.DateTimeFormat("ja-JP", {
     timeZone: TIME_ZONE,
     year: "numeric",
@@ -25,19 +15,112 @@ function tokyoDateParts(date) {
   return Object.fromEntries(parts.map((part) => [part.type, part.value]));
 }
 
-function formatDateRange(start, end) {
+function formatDateRange(start: Date | null, end: Date | null) {
   if (!start || !end) return null;
   const startParts = tokyoDateParts(start);
   const endParts = tokyoDateParts(new Date(end.getTime() - 1));
   return `${startParts.year}/${startParts.month}/${startParts.day}-${endParts.year}/${endParts.month}/${endParts.day}`;
 }
 
-// 基準日: 2026年10月21日 (火) 午前10時 JST
+// ========== 11/25実運用不具合修正テスト ==========
+
+test("parseCondition: 12月1日から4日の間の午後 (日付範囲の最終日を含む)", () => {
+  const now = new Date("2024-11-26T10:00:00+09:00");
+  const parsed = parseCondition("12月1日から4日の間の午後", now);
+  
+  assert.ok(parsed, "parseConditionがnullを返してはいけない");
+  assert.ok(parsed.rangeStart, "rangeStartが設定されているべき");
+  assert.ok(parsed.rangeEnd, "rangeEndが設定されているべき");
+  
+  // rangeStartは12月1日0時
+  assert.strictEqual(parsed.rangeStart.toISOString(), "2024-11-30T15:00:00.000Z"); // 12/1 0時 JST = 11/30 15時 UTC
+  // rangeEndは12月5日0時（12月4日の翌日）
+  assert.strictEqual(parsed.rangeEnd.toISOString(), "2024-12-04T15:00:00.000Z"); // 12/5 0時 JST = 12/4 15時 UTC
+  
+  assert.strictEqual(parsed.startHour, 13, "午後の開始時刻は13時");
+  assert.strictEqual(parsed.endTimeMinutes, 18 * 60, "午後の終了時刻は18時");
+});
+
+test("generateCandidateSlots: 12月1日から4日の間の午後 (12/1, 12/2, 12/3, 12/4の4日分の候補が生成される)", () => {
+  const now = new Date("2024-11-26T10:00:00+09:00");
+  const parsed = parseCondition("12月1日から4日の間の午後", now);
+  const slots = generateCandidateSlots(parsed, now);
+  
+  // 12月1日、2日、3日、4日の4日分、各日13-18時でデフォルト2時間枠なら4枠（13:00, 14:00, 15:00, 16:00）= 16候補
+  assert.ok(slots.length >= 16, `12/1-4の4日分の候補が必要（実際: ${slots.length}件）`);
+  
+  // 各日付が含まれているか確認
+  const days = [...new Set(slots.map(slot => slot.day))];
+  assert.ok(days.includes(1), "12月1日の候補が含まれているべき");
+  assert.ok(days.includes(2), "12月2日の候補が含まれているべき");
+  assert.ok(days.includes(3), "12月3日の候補が含まれているべき");
+  assert.ok(days.includes(4), "12月4日の候補が含まれているべき");
+});
+
+test("generateCandidateSlots: 12月1日〜4日 (スラッシュ表記)", () => {
+  const now = new Date("2024-11-26T10:00:00+09:00");
+  const parsed = parseCondition("12月1日〜4日", now);
+  const slots = generateCandidateSlots(parsed, now);
+  
+  const days = [...new Set(slots.map(slot => slot.day))];
+  assert.ok(days.includes(1), "12月1日の候補が含まれているべき");
+  assert.ok(days.includes(2), "12月2日の候補が含まれているべき");
+  assert.ok(days.includes(3), "12月3日の候補が含まれているべき");
+  assert.ok(days.includes(4), "12月4日の候補が含まれているべき");
+});
+
+test("generateCandidateSlots: 12/1〜12/4 (スラッシュ+数字表記)", () => {
+  const now = new Date("2024-11-26T10:00:00+09:00");
+  const parsed = parseCondition("12/1〜12/4", now);
+  const slots = generateCandidateSlots(parsed, now);
+  
+  const days = [...new Set(slots.map(slot => slot.day))];
+  assert.ok(days.includes(1), "12月1日の候補が含まれているべき");
+  assert.ok(days.includes(2), "12月2日の候補が含まれているべき");
+  assert.ok(days.includes(3), "12月3日の候補が含まれているべき");
+  assert.ok(days.includes(4), "12月4日の候補が含まれているべき");
+});
+
+test("generateCandidateSlots: 12月1日から12月4日 (冗長表記)", () => {
+  const now = new Date("2024-11-26T10:00:00+09:00");
+  const parsed = parseCondition("12月1日から12月4日", now);
+  const slots = generateCandidateSlots(parsed, now);
+  
+  const days = [...new Set(slots.map(slot => slot.day))];
+  assert.ok(days.includes(1), "12月1日の候補が含まれているべき");
+  assert.ok(days.includes(2), "12月2日の候補が含まれているべき");
+  assert.ok(days.includes(3), "12月3日の候補が含まれているべき");
+  assert.ok(days.includes(4), "12月4日の候補が含まれているべき");
+});
+
+test("generateCandidateSlots: 11月28日〜12月2日 (月跨ぎ)", () => {
+  const now = new Date("2024-11-26T10:00:00+09:00");
+  const parsed = parseCondition("11月28日〜12月2日", now);
+  const slots = generateCandidateSlots(parsed, now);
+  
+  const daysWithMonths = [...new Set(slots.map(slot => `${slot.month}/${slot.day}`))];
+  assert.ok(daysWithMonths.includes("11/28"), "11月28日の候補が含まれているべき");
+  assert.ok(daysWithMonths.includes("11/29"), "11月29日の候補が含まれているべき");
+  assert.ok(daysWithMonths.includes("11/30"), "11月30日の候補が含まれているべき");
+  assert.ok(daysWithMonths.includes("12/1"), "12月1日の候補が含まれているべき");
+  assert.ok(daysWithMonths.includes("12/2"), "12月2日の候補が含まれているべき");
+});
+
+test("generateCandidateSlots: 明日 (1日だけ)", () => {
+  const now = new Date("2024-11-26T10:00:00+09:00");
+  const parsed = parseCondition("明日", now);
+  const slots = generateCandidateSlots(parsed, now);
+  
+  const days = [...new Set(slots.map(slot => slot.day))];
+  assert.strictEqual(days.length, 1, "明日は1日のみ");
+  assert.strictEqual(days[0], 27, "11月27日");
+});
+
+// ========== 年推論バグ修正テスト（2026年10月21日基準） ==========
+
 const BASE_NOW = new Date("2026-10-21T10:00:00+09:00");
 
 test("年なし期間: 開始日が昨日、終わりが未来 → 今年として扱う（バグ修正）", () => {
-  // 10/20-10/25で、基準日が10/21のとき
-  // 開始日10/20は昨日だが、終わり10/25はまだ未来なので、今年2026年として扱うべき
   const result = parseCondition("10/20-10/25の午後3時間枠", BASE_NOW);
   assert.ok(result, "結果がnullではない");
   assert.strictEqual(result.invalidDateRange, false, "有効な日付範囲");
@@ -59,8 +142,6 @@ test("年なし期間: 開始日が今日 → 今年として扱う", () => {
 });
 
 test("年なし期間: 終わりの日が昨日 → 翌年として扱う", () => {
-  // 10/10-10/20で、基準日が10/21のとき
-  // 終わり10/20が昨日なので、完全に過去。翌年2027年として扱う
   const result = parseCondition("10/10-10/20の午後", BASE_NOW);
   assert.ok(result, "結果がnullではない");
   assert.strictEqual(result.invalidDateRange, false, "有効な日付範囲");
@@ -68,8 +149,6 @@ test("年なし期間: 終わりの日が昨日 → 翌年として扱う", () =
 });
 
 test("年なし期間: 終わりの日が今日 → 今年として扱う（境界条件）", () => {
-  // 10/15-10/21で、基準日が10/21のとき
-  // 終わり10/21は今日なので、今年として扱う
   const result = parseCondition("10/15-10/21の午後", BASE_NOW);
   assert.ok(result, "結果がnullではない");
   assert.strictEqual(result.invalidDateRange, false, "有効な日付範囲");
@@ -84,8 +163,6 @@ test("年なし期間: 日本語形式でも同様 - 開始が昨日、終わり
 });
 
 test("年なし単一日付: 過去の日付は翌年（従来の動作を維持）", () => {
-  // 10/20で、基準日が10/21のとき
-  // 単一日付が過去なら翌年として扱う（従来動作）
   const result = parseCondition("10/20", BASE_NOW);
   assert.ok(result, "結果がnullではない");
   assert.strictEqual(result.invalidDateRange, false, "有効な日付");
@@ -151,8 +228,6 @@ test("年なし単一日付: 未来の日付は今年（従来の動作を維持
 });
 
 test("年なし期間: 月をまたぐ場合（開始が昨日、終わりが来月）", () => {
-  // 10/20-11/5で、基準日が10/21のとき
-  // 開始は昨日だが、終わりが未来なので今年
   const result = parseCondition("10/20-11/5の午後", BASE_NOW);
   assert.ok(result, "結果がnullではない");
   assert.strictEqual(result.invalidDateRange, false, "有効な日付範囲");
@@ -160,22 +235,17 @@ test("年なし期間: 月をまたぐ場合（開始が昨日、終わりが来
 });
 
 test("年またぎ期間: 12/28-1/5を12/30に入力 → 今年12/28〜翌年1/5", () => {
-  // 基準日: 2026年12月30日
   const now = new Date("2026-12-30T10:00:00+09:00");
   const result = parseCondition("12/28-1/5の午後", now);
   assert.ok(result, "結果がnullではない");
   assert.strictEqual(result.invalidDateRange, false, "有効な日付範囲");
-  // 開始は今年12/28（過去だが終わりが未来なので今年）、終わりは翌年1/5
   assert.strictEqual(formatDateRange(result.rangeStart, result.rangeEnd), "2026/12/28-2027/1/5", "今年12/28から翌年1/5");
 });
 
-test("年またぎ期間: 12/28-1/5を1/3に入力 → 前年12/28〜今年1/5（開始日は12/28のまま）", () => {
-  // 基準日: 2027年1月3日
+test("年またぎ期間: 12/28-1/5を1/3に入力 → 前年12/28〜今年1/5", () => {
   const now = new Date("2027-01-03T10:00:00+09:00");
   const result = parseCondition("12/28-1/5の午後", now);
   assert.ok(result, "結果がnullではない");
   assert.strictEqual(result.invalidDateRange, false, "有効な日付範囲");
-  // 終わり1/5は未来なので今年として解釈。開始12/28は前年だが終わりが今年なので前年12/28
-  // 過ぎた日（12/28〜1/2）は候補生成時に落ちる
   assert.strictEqual(formatDateRange(result.rangeStart, result.rangeEnd), "2026/12/28-2027/1/5", "前年12/28から今年1/5");
 });

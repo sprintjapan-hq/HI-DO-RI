@@ -564,7 +564,12 @@ export function generateCandidateSlots(
   const rangeEnd = parsed.rangeEnd ?? new Date(now.getTime() + parsed.horizonDays * 24 * 60 * 60 * 1000);
   const slots: TimeSlot[] = [];
 
-  for (let offset = 0; offset < parsed.horizonDays; offset += 1) {
+  // Safety check: validate rangeEnd to prevent infinite loop
+  if (!Number.isFinite(rangeEnd.getTime())) return [];
+
+  // Loop through each day in the range (rangeEnd is exclusive, representing the start of the day after the last included day)
+  // Guard: limit to 366 days maximum to prevent infinite loops
+  for (let offset = 0; offset < 366; offset += 1) {
     const probe = new Date(rangeStart.getTime() + offset * 24 * 60 * 60 * 1000);
     if (probe >= rangeEnd) break;
     const parts = tokyoDateParts(probe);
